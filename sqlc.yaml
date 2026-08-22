@@ -1,0 +1,25 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: database/migrations
+    queries: internal/database/queries
+    gen:
+      go:
+        package: database
+        out: internal/database
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_empty_slices: true
+        overrides:
+          # Currency must never pass through float64.
+          - db_type: pg_catalog.numeric
+            go_type: github.com/shopspring/decimal.Decimal
+          - db_type: pg_catalog.numeric
+            nullable: true
+            go_type: github.com/shopspring/decimal.NullDecimal
+          # google/uuid reads better at call sites than pgtype.UUID.
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type: github.com/google/uuid.NullUUID

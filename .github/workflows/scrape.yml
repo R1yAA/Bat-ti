@@ -1,0 +1,55 @@
+# Hourly dispatcher. The schedule fires every hour; cmd/scrape decides which
+# vendors are actually due from their configured slot in config/vendors.go, so
+# adding or re-timing a vendor never means editing this file.
+name: scrape
+
+on:
+  schedule:
+    # Cron here is UTC. 23:00 UTC is 04:30 IST, which is where the vendor slots
+    # start; each vendor runs one hour after the previous one.
+    - cron: '0 * * * *'
+  # Always available as a manual kick — needed because GitHub disables
+  # scheduled workflows after 60 days of repository inactivity, and useful for
+  # re-running a vendor after a failure.
+  workflow_dispatch:
+    inputs:
+      vendor:
+        description: 'Scrape one vendor by slug instead of whatever is due'
+        required: false
+        type: string
+
+concurrency:
+  # Vendors are scraped strictly one at a time. If an hour's run is still going
+  # when the next fires, the new one waits rather than doubling up on a
+  # vendor's site.
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    # A full catalogue sync of the per-product tiers takes tens of minutes;
+    # this ceiling stops a hung run from burning the month's minutes.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Apply pending migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: go run ./cmd/migrate up
+
+      - name: Scrape
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -n "${{ inputs.vendor }}" ]; then
+            go run ./cmd/scrape --vendor="${{ inputs.vendor }}"
+          else
+            go run ./cmd/scrape --due-now
+          fi
