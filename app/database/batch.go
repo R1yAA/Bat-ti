@@ -265,7 +265,7 @@ on conflict (vendor_id, product_url) do update set
     delisted_at          = null,
     last_seen_at         = now(),
     updated_at           = now()
-returning vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at
+returning vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at
 `
 
 type UpsertVendorListingBatchResults struct {
@@ -358,6 +358,7 @@ func (b *UpsertVendorListingBatchResults) QueryRow(f func(int, VendorListing, er
 			&i.PriceLastChangedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DetailFetchedAt,
 		)
 		if f != nil {
 			f(t, i, err)

@@ -37,6 +37,18 @@ const (
 	ScraperTierPlaywright ScraperTier = "playwright"
 )
 
+// ProductPageAddsDetail reports whether a vendor's product page carries
+// anything its catalogue feed does not.
+//
+// Shopify, DotPe and static-HTML vendors publish variants and prices in the
+// feed itself, so their product pages hold nothing extra and fetching one
+// would be wasted work. WooCommerce publishes only a price range: the sizes,
+// their individual prices and the quantity-discount ladder live on the page
+// alone, so those listings are worth reading one page at a time.
+func (tier ScraperTier) ProductPageAddsDetail() bool {
+	return tier == ScraperTierWooCommerceJSON
+}
+
 // CatalogDiscovery tells the catalogue-sync phase how to enumerate a vendor's
 // products. Shopify and WooCommerce need none of this because their APIs
 // enumerate themselves.

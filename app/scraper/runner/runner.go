@@ -99,6 +99,7 @@ func (runner *Runner) RunVendorBySlug(ctx context.Context, vendorSlug string) er
 func (runner *Runner) EnrichOneListing(
 	ctx context.Context,
 	vendorListingID uuid.UUID,
+	recordPriceHistory bool,
 ) error {
 	listingRow, err := runner.queries.GetVendorListingByID(ctx, vendorListingID)
 	if err != nil {
@@ -136,8 +137,11 @@ func (runner *Runner) EnrichOneListing(
 	if err != nil {
 		return err
 	}
-	return runner.persistDeepDetail(ctx, storedRow, scrapedListing,
-		time.Now().In(runner.businessTimeLocation))
+	if err := runner.persistDeepDetail(ctx, storedRow, scrapedListing,
+		time.Now().In(runner.businessTimeLocation), recordPriceHistory); err != nil {
+		return err
+	}
+	return runner.queries.MarkListingDetailFetched(ctx, vendorListingID)
 }
 
 // RunDueVendors scrapes every vendor whose hour slot has arrived, strictly one
@@ -342,7 +346,7 @@ func (runner *Runner) scrapeAndPersist(
 		if err != nil {
 			return summary, err
 		}
-		if err := runner.persistDeepDetail(ctx, enrichedRow, enrichedListing, scrapedOnDate); err != nil {
+		if err := runner.persistDeepDetail(ctx, enrichedRow, enrichedListing, scrapedOnDate, true); err != nil {
 			return summary, err
 		}
 		summary.trackedEnriched++
@@ -522,6 +526,7 @@ func (runner *Runner) persistDeepDetail(
 	listingRow database.VendorListing,
 	scrapedListing scraper.ScrapedListing,
 	scrapedOnDate time.Time,
+	recordPriceHistory bool,
 ) error {
 	transaction, err := runner.pool.Begin(ctx)
 	if err != nil {
@@ -567,7 +572,7 @@ func (runner *Runner) persistDeepDetail(
 				}
 			}
 
-			if scrapedVariant.Price != nil {
+			if recordPriceHistory && scrapedVariant.Price != nil {
 				if err := transactionalQueries.UpsertVariantPriceHistory(ctx,
 					database.UpsertVariantPriceHistoryParams{
 						VariantID:     database.NullUUID(variantRow.VariantID),
@@ -599,7 +604,7 @@ func (runner *Runner) persistDeepDetail(
 			}
 		}
 
-		if scrapedListing.BasePrice != nil {
+		if recordPriceHistory && scrapedListing.BasePrice != nil {
 			if err := transactionalQueries.UpsertListingPriceHistory(ctx,
 				database.UpsertListingPriceHistoryParams{
 					VendorListingID: database.NullUUID(listingRow.VendorListingID),

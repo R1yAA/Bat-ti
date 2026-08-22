@@ -128,7 +128,7 @@ export function ListingPage() {
               }
             >
               {setTracked.isPending
-                ? "Reading the product page…"
+                ? "Saving…"
                 : listing.is_tracked
                   ? "⭐ Tracking"
                   : "☆ Track price"}
@@ -148,8 +148,8 @@ export function ListingPage() {
 
           {!listing.is_tracked && !setTracked.isPending && (
             <p className="text-xs text-ink-faint">
-              Track this to read its quantity discounts now, and to record a
-              price every day from here on.
+              Sizes and quantity discounts are read live. Track this to record
+              its price every day, which is what builds the history graph.
             </p>
           )}
           {setTracked.data?.detail_message && (

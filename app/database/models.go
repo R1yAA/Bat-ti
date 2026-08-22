@@ -158,4 +158,6 @@ type VendorListing struct {
 	PriceLastChangedAt pgtype.Timestamptz  `json:"price_last_changed_at"`
 	CreatedAt          pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz  `json:"updated_at"`
+	// When the product page was last read for variants and MOQ tiers; null means never.
+	DetailFetchedAt pgtype.Timestamptz `json:"detail_fetched_at"`
 }

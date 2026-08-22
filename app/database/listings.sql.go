@@ -40,7 +40,7 @@ func (q *Queries) GetVariantByID(ctx context.Context, variantID uuid.UUID) (Vari
 }
 
 const getVendorListingByID = `-- name: GetVendorListingByID :one
-select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at from vendor_listings where vendor_listing_id = $1
+select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at from vendor_listings where vendor_listing_id = $1
 `
 
 func (q *Queries) GetVendorListingByID(ctx context.Context, vendorListingID uuid.UUID) (VendorListing, error) {
@@ -68,12 +68,13 @@ func (q *Queries) GetVendorListingByID(ctx context.Context, vendorListingID uuid
 		&i.PriceLastChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DetailFetchedAt,
 	)
 	return i, err
 }
 
 const getVendorListingsByIDs = `-- name: GetVendorListingsByIDs :many
-select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at from vendor_listings where vendor_listing_id = any($1::uuid[])
+select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at from vendor_listings where vendor_listing_id = any($1::uuid[])
 `
 
 // The roll-up above rewrites price columns, so the scraper re-reads what it
@@ -109,6 +110,7 @@ func (q *Queries) GetVendorListingsByIDs(ctx context.Context, dollar_1 []uuid.UU
 			&i.PriceLastChangedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DetailFetchedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -121,7 +123,7 @@ func (q *Queries) GetVendorListingsByIDs(ctx context.Context, dollar_1 []uuid.UU
 }
 
 const listTrackedListingsForVendor = `-- name: ListTrackedListingsForVendor :many
-select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at from vendor_listings
+select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at from vendor_listings
 where vendor_id = $1 and is_tracked and not is_delisted
 order by listing_name
 `
@@ -157,6 +159,7 @@ func (q *Queries) ListTrackedListingsForVendor(ctx context.Context, vendorID uui
 			&i.PriceLastChangedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DetailFetchedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -210,6 +213,16 @@ func (q *Queries) ListVariantsForListing(ctx context.Context, vendorListingID uu
 	return items, nil
 }
 
+const markListingDetailFetched = `-- name: MarkListingDetailFetched :exec
+update vendor_listings set detail_fetched_at = now(), updated_at = now()
+where vendor_listing_id = $1
+`
+
+func (q *Queries) MarkListingDetailFetched(ctx context.Context, vendorListingID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markListingDetailFetched, vendorListingID)
+	return err
+}
+
 const markUnseenListingsDelisted = `-- name: MarkUnseenListingsDelisted :execrows
 update vendor_listings
 set is_delisted = true, delisted_at = now(), updated_at = now()
@@ -237,7 +250,7 @@ const setListingTracked = `-- name: SetListingTracked :one
 update vendor_listings
 set is_tracked = $2, updated_at = now()
 where vendor_listing_id = $1
-returning vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at
+returning vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at
 `
 
 type SetListingTrackedParams struct {
@@ -270,6 +283,7 @@ func (q *Queries) SetListingTracked(ctx context.Context, arg SetListingTrackedPa
 		&i.PriceLastChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DetailFetchedAt,
 	)
 	return i, err
 }

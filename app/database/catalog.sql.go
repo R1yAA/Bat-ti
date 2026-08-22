@@ -45,7 +45,7 @@ func (q *Queries) CountVendorListings(ctx context.Context, arg CountVendorListin
 }
 
 const findListingByURL = `-- name: FindListingByURL :one
-select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at, vendors.vendor_slug, vendors.vendor_name
+select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at, vendor_listings.detail_fetched_at, vendors.vendor_slug, vendors.vendor_name
 from vendor_listings
 join vendors on vendors.vendor_id = vendor_listings.vendor_id
 where rtrim(vendor_listings.product_url, '/') = rtrim($1::text, '/')
@@ -74,6 +74,7 @@ type FindListingByURLRow struct {
 	PriceLastChangedAt pgtype.Timestamptz  `json:"price_last_changed_at"`
 	CreatedAt          pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz  `json:"updated_at"`
+	DetailFetchedAt    pgtype.Timestamptz  `json:"detail_fetched_at"`
 	VendorSlug         string              `json:"vendor_slug"`
 	VendorName         string              `json:"vendor_name"`
 }
@@ -106,6 +107,7 @@ func (q *Queries) FindListingByURL(ctx context.Context, productUrl string) (Find
 		&i.PriceLastChangedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DetailFetchedAt,
 		&i.VendorSlug,
 		&i.VendorName,
 	)
@@ -204,7 +206,7 @@ func (q *Queries) ListOrderItemsForListing(ctx context.Context, vendorListingID 
 }
 
 const listTrackedListings = `-- name: ListTrackedListings :many
-select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at, vendors.vendor_name, vendors.vendor_slug,
+select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at, vendor_listings.detail_fetched_at, vendors.vendor_name, vendors.vendor_slug,
        (select count(*) from variants
          where variants.vendor_listing_id = vendor_listings.vendor_listing_id
            and not variants.is_delisted) as variant_count
@@ -236,6 +238,7 @@ type ListTrackedListingsRow struct {
 	PriceLastChangedAt pgtype.Timestamptz  `json:"price_last_changed_at"`
 	CreatedAt          pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz  `json:"updated_at"`
+	DetailFetchedAt    pgtype.Timestamptz  `json:"detail_fetched_at"`
 	VendorName         string              `json:"vendor_name"`
 	VendorSlug         string              `json:"vendor_slug"`
 	VariantCount       int64               `json:"variant_count"`
@@ -272,6 +275,7 @@ func (q *Queries) ListTrackedListings(ctx context.Context) ([]ListTrackedListing
 			&i.PriceLastChangedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DetailFetchedAt,
 			&i.VendorName,
 			&i.VendorSlug,
 			&i.VariantCount,
@@ -287,7 +291,7 @@ func (q *Queries) ListTrackedListings(ctx context.Context) ([]ListTrackedListing
 }
 
 const listVendorListings = `-- name: ListVendorListings :many
-select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at,
+select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at, vendor_listings.detail_fetched_at,
        (select count(*) from variants
          where variants.vendor_listing_id = vendor_listings.vendor_listing_id
            and not variants.is_delisted) as variant_count
@@ -333,6 +337,7 @@ type ListVendorListingsRow struct {
 	PriceLastChangedAt pgtype.Timestamptz  `json:"price_last_changed_at"`
 	CreatedAt          pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz  `json:"updated_at"`
+	DetailFetchedAt    pgtype.Timestamptz  `json:"detail_fetched_at"`
 	VariantCount       int64               `json:"variant_count"`
 }
 
@@ -379,6 +384,7 @@ func (q *Queries) ListVendorListings(ctx context.Context, arg ListVendorListings
 			&i.PriceLastChangedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DetailFetchedAt,
 			&i.VariantCount,
 		); err != nil {
 			return nil, err

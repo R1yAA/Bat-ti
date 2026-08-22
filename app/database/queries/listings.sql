@@ -151,3 +151,7 @@ where vendor_listings.vendor_listing_id = $1
 
 -- name: GetVariantByID :one
 select * from variants where variant_id = $1;
+
+-- name: MarkListingDetailFetched :exec
+update vendor_listings set detail_fetched_at = now(), updated_at = now()
+where vendor_listing_id = $1;
