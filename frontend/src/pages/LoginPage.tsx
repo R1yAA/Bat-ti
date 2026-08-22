@@ -74,7 +74,7 @@ export function LoginPage() {
             <ErrorNotice
               error={
                 new Error(
-                  "Sign-in is not configured: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing.",
+                  "Sign-in is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in frontend/.env.local, then restart the dev server.",
                 )
               }
             />

@@ -6,15 +6,19 @@ import { createClient } from "@supabase/supabase-js";
 // different thing entirely and must never appear in a VITE_ variable, because
 // Vite inlines those into the bundle served to the browser.
 const supabaseURL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as
-  | string
-  | undefined;
+// Supabase renamed this key: projects created before 2025 show an "anon" key
+// (a long eyJ... JWT), newer ones a "publishable" key (sb_publishable_...).
+// They serve the same purpose, so either name works and whoever sets this up
+// next does not have to discover the rename first.
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+  import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
 export const isAuthConfigured = Boolean(supabaseURL && supabaseAnonKey);
 
 if (!isAuthConfigured) {
   console.warn(
-    "VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are not set; sign-in is unavailable.",
+    "Sign-in is unavailable: set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY " +
+      "(older projects call the second one VITE_SUPABASE_ANON_KEY).",
   );
 }
 
