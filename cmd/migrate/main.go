@@ -1,5 +1,11 @@
 // Command migrate applies and rolls back the SQL files in database/migrations.
 //
+//	go run ./cmd/migrate up          apply everything pending
+//	go run ./cmd/migrate down        roll back one migration
+//	go run ./cmd/migrate version     print the version and whether it is dirty
+//	go run ./cmd/migrate force 0     clear a dirty marker, asserting the schema
+//	                                 really is at that version
+//
 // The golang-migrate CLI only registers database drivers that were selected by
 // build tag, which makes it awkward to run through `go tool`. Driving the same
 // library from a few lines here imports the driver explicitly instead, so
@@ -12,6 +18,7 @@ import (
 	"flag"
 	"log/slog"
 	"os"
+	"strconv"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
@@ -60,8 +67,20 @@ func main() {
 		}
 		slog.Info("schema version", "version", version, "dirty", isDirty)
 		return
+	case "force":
+		// A migration that fails partway leaves the schema marked dirty, and
+		// every later run refuses to proceed until a person has looked at the
+		// database and said what state it is really in. That is the whole point
+		// of the flag, so this asserts a version rather than guessing one.
+		forcedVersion, parseErr := strconv.Atoi(flag.Arg(1))
+		if parseErr != nil {
+			slog.Error("force needs the version to assert, e.g. \"force 0\" for an empty schema",
+				"error", parseErr)
+			os.Exit(1)
+		}
+		err = migrator.Force(forcedVersion)
 	default:
-		slog.Error("unknown command; expected up, down or version", "command", command)
+		slog.Error("unknown command; expected up, down, version or force", "command", command)
 		os.Exit(1)
 	}
 
