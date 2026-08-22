@@ -15,6 +15,7 @@ import {
 import type { UUID } from "../api/types";
 import { useSession } from "../auth/SessionProvider";
 import { PageHeading } from "../components/AppShell";
+import { useConfirm } from "../components/ConfirmDialog";
 import {
   Button,
   Card,
@@ -193,6 +194,7 @@ function EditableTagRow({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
+  const confirm = useConfirm();
 
   if (isEditing) {
     return (
@@ -247,8 +249,15 @@ function EditableTagRow({
             ✎
           </button>
           <button
-            onClick={() => {
-              if (window.confirm(`Delete "${name}"?`)) onDelete();
+            onClick={async () => {
+              const isConfirmed = await confirm({
+                title: `Delete "${name}"?`,
+                message:
+                  usageCount > 0
+                    ? `${usageCount} item${usageCount === 1 ? "" : "s"} using it will move to Uncategorized.`
+                    : undefined,
+              });
+              if (isConfirmed) onDelete();
             }}
             aria-label={`Delete ${name}`}
             className="grid size-9 shrink-0 place-items-center rounded-lg text-ink-faint hover:bg-rise/10 hover:text-rise"

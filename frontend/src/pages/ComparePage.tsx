@@ -11,6 +11,7 @@ import {
 } from "../api/queries";
 import type { CompareMember } from "../api/types";
 import { PageHeading } from "../components/AppShell";
+import { useConfirm } from "../components/ConfirmDialog";
 import {
   Button,
   EmptyState,
@@ -32,6 +33,7 @@ export function CompareListPage() {
   const entriesQuery = useCompareEntries();
   const createEntry = useCreateCompareEntry();
   const deleteEntry = useDeleteCompareEntry();
+  const confirm = useConfirm();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [newEntryName, setNewEntryName] = useState("");
 
@@ -78,12 +80,13 @@ export function CompareListPage() {
                 </p>
               </Link>
               <button
-                onClick={() => {
-                  if (
-                    window.confirm(`Delete the comparison "${entry.entry_name}"?`)
-                  ) {
-                    deleteEntry.mutate(entry.compare_entry_id);
-                  }
+                onClick={async () => {
+                  const isConfirmed = await confirm({
+                    title: `Delete "${entry.entry_name}"?`,
+                    message:
+                      "The comparison is removed. The products in it are not affected.",
+                  });
+                  if (isConfirmed) deleteEntry.mutate(entry.compare_entry_id);
                 }}
                 aria-label={`Delete ${entry.entry_name}`}
                 className="grid size-10 shrink-0 place-items-center rounded-xl text-ink-faint hover:bg-rise/10 hover:text-rise"

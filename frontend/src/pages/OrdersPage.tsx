@@ -17,6 +17,7 @@ import {
 } from "../api/queries";
 import type { OrderItem, OrderStatus, UUID } from "../api/types";
 import { PageHeading } from "../components/AppShell";
+import { useConfirm } from "../components/ConfirmDialog";
 import {
   Button,
   Card,
@@ -71,6 +72,7 @@ export function OrdersListPage() {
   const entriesQuery = useOrderEntries();
   const createEntry = useCreateOrderEntry();
   const deleteEntry = useDeleteOrderEntry();
+  const confirm = useConfirm();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [entryName, setEntryName] = useState("");
   const [orderedOn, setOrderedOn] = useState(today());
@@ -121,10 +123,12 @@ export function OrdersListPage() {
                 </p>
               </div>
               <button
-                onClick={() => {
-                  if (window.confirm("Delete this order and all its items?")) {
-                    deleteEntry.mutate(entry.order_entry_id);
-                  }
+                onClick={async () => {
+                  const isConfirmed = await confirm({
+                    title: "Delete this order?",
+                    message: `"${entry.entry_name ?? "Untitled order"}" and all ${entry.item_count} of its items will be removed.`,
+                  });
+                  if (isConfirmed) deleteEntry.mutate(entry.order_entry_id);
                 }}
                 aria-label="Delete order"
                 className="grid size-10 shrink-0 place-items-center rounded-xl text-ink-faint hover:bg-rise/10 hover:text-rise"
@@ -186,6 +190,7 @@ export function OrderDetailPage() {
   const entryQuery = useOrderEntry(orderEntryID);
   const updateEntry = useUpdateOrderEntry();
   const deleteItem = useDeleteOrderItem();
+  const confirm = useConfirm();
 
   const [isEditingEntry, setIsEditingEntry] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -329,8 +334,13 @@ export function OrderDetailPage() {
                   ✎
                 </button>
                 <button
-                  onClick={() => {
-                    if (window.confirm("Remove this item from the order?")) {
+                  onClick={async () => {
+                    const isConfirmed = await confirm({
+                      title: "Remove this item?",
+                      message: decodeEntities(item.listing_name),
+                      confirmLabel: "Remove",
+                    });
+                    if (isConfirmed) {
                       deleteItem.mutate({
                         orderItemID: item.order_item_id,
                         orderEntryID,
