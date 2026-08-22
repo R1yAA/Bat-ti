@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/R1yAA/Bat-ti/internal/scraper"
+	"github.com/R1yAA/Bat-ti/app/scraper"
 	"github.com/shopspring/decimal"
 )
 

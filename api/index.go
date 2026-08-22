@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/R1yAA/Bat-ti/internal/handlers"
-	"github.com/R1yAA/Bat-ti/internal/middleware"
+	"github.com/R1yAA/Bat-ti/app/handlers"
+	"github.com/R1yAA/Bat-ti/app/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

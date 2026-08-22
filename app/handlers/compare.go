@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/R1yAA/Bat-ti/internal/database"
-	"github.com/R1yAA/Bat-ti/internal/money"
+	"github.com/R1yAA/Bat-ti/app/database"
+	"github.com/R1yAA/Bat-ti/app/money"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"

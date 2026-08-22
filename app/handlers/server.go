@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/R1yAA/Bat-ti/internal/database"
-	"github.com/R1yAA/Bat-ti/internal/middleware"
+	"github.com/R1yAA/Bat-ti/app/database"
+	"github.com/R1yAA/Bat-ti/app/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"

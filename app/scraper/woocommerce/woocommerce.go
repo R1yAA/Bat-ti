@@ -25,8 +25,8 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/R1yAA/Bat-ti/internal/scraper"
-	"github.com/R1yAA/Bat-ti/internal/scraper/httpclient"
+	"github.com/R1yAA/Bat-ti/app/scraper"
+	"github.com/R1yAA/Bat-ti/app/scraper/httpclient"
 	"github.com/shopspring/decimal"
 )
 

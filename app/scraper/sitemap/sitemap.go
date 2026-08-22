@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/R1yAA/Bat-ti/internal/scraper/httpclient"
+	"github.com/R1yAA/Bat-ti/app/scraper/httpclient"
 )
 
 // Entry is one URL from a sitemap.

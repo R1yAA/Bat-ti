@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/R1yAA/Bat-ti/internal/database"
-	"github.com/R1yAA/Bat-ti/internal/scraper/runner"
+	"github.com/R1yAA/Bat-ti/app/database"
+	"github.com/R1yAA/Bat-ti/app/scraper/runner"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )

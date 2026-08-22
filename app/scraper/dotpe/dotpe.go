@@ -21,9 +21,9 @@ import (
 	"strconv"
 
 	"github.com/R1yAA/Bat-ti/config"
-	"github.com/R1yAA/Bat-ti/internal/scraper"
-	"github.com/R1yAA/Bat-ti/internal/scraper/httpclient"
-	"github.com/R1yAA/Bat-ti/internal/scraper/sitemap"
+	"github.com/R1yAA/Bat-ti/app/scraper"
+	"github.com/R1yAA/Bat-ti/app/scraper/httpclient"
+	"github.com/R1yAA/Bat-ti/app/scraper/sitemap"
 	"github.com/shopspring/decimal"
 )
 
