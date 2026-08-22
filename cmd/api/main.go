@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/R1yAA/Bat-ti/internal/handlers"
+	"github.com/R1yAA/Bat-ti/internal/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -27,6 +29,47 @@ func main() {
 	}
 }
 
+// buildAuthenticator wires up Supabase JWT verification.
+//
+// Turning authentication off requires saying so out loud with
+// AUTH_DISABLED=true, and is refused unless the database is a local one. An
+// unauthenticated deployment pointed at the real database would expose every
+// order and price in it, and that must not be reachable by forgetting to set a
+// variable.
+func buildAuthenticator(
+	ctx context.Context,
+	logger *slog.Logger,
+) (*middleware.Authenticator, error) {
+	if os.Getenv("AUTH_DISABLED") == "true" {
+		if !isLocalDatabase(os.Getenv("DATABASE_URL")) {
+			return nil, errors.New(
+				"AUTH_DISABLED is only honoured against a local database; " +
+					"refusing to serve a remote one unauthenticated")
+		}
+		return middleware.NewDisabledAuthenticator(logger), nil
+	}
+	return middleware.NewAuthenticator(ctx, os.Getenv("SUPABASE_URL"), logger)
+}
+
+// isLocalDatabase reports whether the URL points at this machine.
+//
+// The host is parsed out rather than matched as a substring: "@localhost"
+// appears in postgres://user:pw@localhost.example.com/db too, and treating
+// that as local would serve a remote database with authentication switched
+// off — the exact outcome the caller is guarding against.
+func isLocalDatabase(databaseURL string) bool {
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		return false
+	}
+	switch parsed.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
 func run(logger *slog.Logger) error {
 	ctx, stopSignalHandling := signal.NotifyContext(context.Background(),
 		os.Interrupt, syscall.SIGTERM)
@@ -36,6 +79,13 @@ func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return fmt.Errorf("DATABASE_URL is not set; copy .env.example to .env or export it")
+	}
+
+	// Settled before anything else connects: whether this process is willing
+	// to serve unauthenticated must not depend on the database answering.
+	authenticator, err := buildAuthenticator(ctx, logger)
+	if err != nil {
+		return err
 	}
 
 	pool, err := pgxpool.New(ctx, databaseURL)
@@ -53,7 +103,7 @@ func run(logger *slog.Logger) error {
 		port = "8080"
 	}
 
-	server := handlers.NewServer(pool, logger)
+	server := handlers.NewServer(pool, logger, authenticator)
 	httpServer := &http.Server{
 		Addr:    ":" + port,
 		Handler: server.BuildEngine(),

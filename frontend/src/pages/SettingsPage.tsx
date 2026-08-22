@@ -13,6 +13,7 @@ import {
   useVendors,
 } from "../api/queries";
 import type { UUID } from "../api/types";
+import { useSession } from "../auth/SessionProvider";
 import { PageHeading } from "../components/AppShell";
 import {
   Button,
@@ -30,11 +31,31 @@ export function SettingsPage() {
   return (
     <div className="space-y-4">
       <PageHeading title="Settings" />
+      <AccountSection />
       <CategoriesSection />
       <OccasionTagsSection />
       <VendorHealthSection />
       <DangerZone />
     </div>
+  );
+}
+
+function AccountSection() {
+  const { session, signOut } = useSession();
+  return (
+    <Card>
+      <h2 className="mb-1 text-sm font-semibold tracking-wide text-ink-soft uppercase">
+        Account
+      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <p className="min-w-0 truncate text-sm text-ink">
+          {session?.user.email ?? "Signed in"}
+        </p>
+        <Button variant="ghost" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </div>
+    </Card>
   );
 }
 

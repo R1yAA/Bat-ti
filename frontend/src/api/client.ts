@@ -1,6 +1,8 @@
 // The single place that talks to the API. Everything else goes through the
 // hooks in queries.ts, so a route change lands in one file.
 
+import { getAccessToken } from "../auth/supabase";
+
 /** ApiError carries the server's own message, which the handlers write to be
  *  read by a person ("type exactly \"DELETE ALL MY DATA\" to confirm"), so it
  *  is shown as-is rather than replaced with a generic failure notice. */
@@ -18,12 +20,17 @@ async function request<TResponse>(
   path: string,
   init?: RequestInit,
 ): Promise<TResponse> {
+  // Read per request rather than once at module load: the token is refreshed
+  // in the background, and a cached one goes stale mid-session.
+  const accessToken = await getAccessToken();
+
+  const headers: Record<string, string> = {};
+  if (init?.body !== undefined) headers["Content-Type"] = "application/json";
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
   const response = await fetch(`/api${path}`, {
     ...init,
-    headers:
-      init?.body === undefined
-        ? init?.headers
-        : { "Content-Type": "application/json", ...init?.headers },
+    headers: { ...headers, ...(init?.headers as Record<string, string>) },
   });
 
   if (!response.ok) {
