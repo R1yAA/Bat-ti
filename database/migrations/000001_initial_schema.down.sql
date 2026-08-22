@@ -1,0 +1,16 @@
+drop table if exists scrape_runs;
+drop table if exists order_item_occasion_tags;
+drop table if exists order_item_category_tags;
+drop table if exists order_items;
+drop table if exists order_entries;
+drop table if exists occasion_tags;
+drop trigger if exists trg_reject_system_category_deletion on categories;
+drop function if exists reject_system_category_deletion();
+drop table if exists categories;
+drop table if exists compare_entry_members;
+drop table if exists compare_entries;
+drop table if exists price_history_entries;
+drop table if exists moq_tiers;
+drop table if exists variants;
+drop table if exists vendor_listings;
+drop table if exists vendors;
