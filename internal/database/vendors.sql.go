@@ -12,6 +12,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getVendorByID = `-- name: GetVendorByID :one
+select vendor_id, vendor_slug, vendor_name, source_base_url, scraper_tier, scrape_hour_utc, last_successful_scrape_timestamp, last_scrape_attempt_timestamp, last_scrape_error, created_at, updated_at from vendors where vendor_id = $1
+`
+
+func (q *Queries) GetVendorByID(ctx context.Context, vendorID uuid.UUID) (Vendor, error) {
+	row := q.db.QueryRow(ctx, getVendorByID, vendorID)
+	var i Vendor
+	err := row.Scan(
+		&i.VendorID,
+		&i.VendorSlug,
+		&i.VendorName,
+		&i.SourceBaseUrl,
+		&i.ScraperTier,
+		&i.ScrapeHourUtc,
+		&i.LastSuccessfulScrapeTimestamp,
+		&i.LastScrapeAttemptTimestamp,
+		&i.LastScrapeError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getVendorBySlug = `-- name: GetVendorBySlug :one
 select vendor_id, vendor_slug, vendor_name, source_base_url, scraper_tier, scrape_hour_utc, last_successful_scrape_timestamp, last_scrape_attempt_timestamp, last_scrape_error, created_at, updated_at from vendors where vendor_slug = $1
 `

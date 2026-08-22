@@ -13,6 +13,33 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+const getVariantByID = `-- name: GetVariantByID :one
+select variant_id, vendor_listing_id, variant_label, external_variant_id, variant_sku, is_in_stock, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at from variants where variant_id = $1
+`
+
+func (q *Queries) GetVariantByID(ctx context.Context, variantID uuid.UUID) (Variant, error) {
+	row := q.db.QueryRow(ctx, getVariantByID, variantID)
+	var i Variant
+	err := row.Scan(
+		&i.VariantID,
+		&i.VendorListingID,
+		&i.VariantLabel,
+		&i.ExternalVariantID,
+		&i.VariantSku,
+		&i.IsInStock,
+		&i.IsDelisted,
+		&i.DelistedAt,
+		&i.LastSeenAt,
+		&i.PackSize,
+		&i.CurrentPrice,
+		&i.PreviousPrice,
+		&i.PriceLastChangedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getVendorListingByID = `-- name: GetVendorListingByID :one
 select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at from vendor_listings where vendor_listing_id = $1
 `

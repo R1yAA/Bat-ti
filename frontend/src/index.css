@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/* The palette is a lit wick: warm amber against deep brown, on cream. It is
+   named for what each colour does rather than what it is, so a later change of
+   hue does not leave every class name lying. */
+@theme {
+  --color-wick-50: #fdf8f0;
+  --color-wick-100: #f7ead6;
+  --color-wick-200: #eed3ab;
+  --color-wick-300: #e2b478;
+  --color-wick-400: #d69350;
+  --color-wick-500: #c97a35;
+  --color-wick-600: #ab5f2a;
+  --color-wick-700: #8a4826;
+  --color-wick-800: #713b25;
+  --color-wick-900: #5d3222;
+  --color-wick-950: #331910;
+
+  --color-ink: #2b1d15;
+  --color-ink-soft: #6b564a;
+  --color-ink-faint: #9a877c;
+
+  --color-surface: #fffdf9;
+  --color-surface-sunk: #f7f1e7;
+
+  --color-rise: #c0392b; /* a price went up — bad news, red */
+  --color-fall: #17795e; /* a price came down — good news, green */
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  background-color: var(--color-surface-sunk);
+  color: var(--color-ink);
+  /* Prices are compared column-to-column constantly; lining figures of equal
+     width stop the eye having to re-anchor on every row. */
+  font-variant-numeric: tabular-nums;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+/* The compare table and any wide content scroll inside their own container.
+   Momentum scrolling makes the horizontal swipe feel native on a phone. */
+.swipe-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}

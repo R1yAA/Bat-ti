@@ -1,0 +1,450 @@
+package handlers
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/R1yAA/Bat-ti/internal/database"
+	"github.com/R1yAA/Bat-ti/internal/money"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+)
+
+// P1 — the vendor catalogue view and the listing content page.
+
+type vendorResponse struct {
+	VendorID               uuid.UUID  `json:"vendor_id"`
+	VendorSlug             string     `json:"vendor_slug"`
+	VendorName             string     `json:"vendor_name"`
+	SourceBaseURL          string     `json:"source_base_url"`
+	ScraperTier            string     `json:"scraper_tier"`
+	LastSuccessfulScrapeAt *time.Time `json:"last_successful_scrape_at"`
+	LastScrapeAttemptAt    *time.Time `json:"last_scrape_attempt_at"`
+	LastScrapeError        *string    `json:"last_scrape_error"`
+}
+
+func toVendorResponse(vendorRow database.Vendor) vendorResponse {
+	return vendorResponse{
+		VendorID:               vendorRow.VendorID,
+		VendorSlug:             vendorRow.VendorSlug,
+		VendorName:             vendorRow.VendorName,
+		SourceBaseURL:          vendorRow.SourceBaseUrl,
+		ScraperTier:            vendorRow.ScraperTier,
+		LastSuccessfulScrapeAt: database.TimeValue(vendorRow.LastSuccessfulScrapeTimestamp),
+		LastScrapeAttemptAt:    database.TimeValue(vendorRow.LastScrapeAttemptTimestamp),
+		LastScrapeError:        database.TextValue(vendorRow.LastScrapeError),
+	}
+}
+
+// FR-X-3: the last successful scrape is shown wherever a vendor is chosen, so
+// staleness is always visible.
+func (server *Server) handleListVendors(context *gin.Context) {
+	vendorRows, err := server.queries.ListVendors(context)
+	if err != nil {
+		server.respondDatabaseError(context, err, "vendors")
+		return
+	}
+
+	vendorResponses := make([]vendorResponse, 0, len(vendorRows))
+	for _, vendorRow := range vendorRows {
+		vendorResponses = append(vendorResponses, toVendorResponse(vendorRow))
+	}
+	context.JSON(http.StatusOK, gin.H{"vendors": vendorResponses})
+}
+
+type listingSummaryResponse struct {
+	VendorListingID    uuid.UUID            `json:"vendor_listing_id"`
+	ListingName        string               `json:"listing_name"`
+	ProductURL         string               `json:"product_url"`
+	PrimaryImageURL    *string              `json:"primary_image_url"`
+	IsInStock          bool                 `json:"is_in_stock"`
+	IsDelisted         bool                 `json:"is_delisted"`
+	IsTracked          bool                 `json:"is_tracked"`
+	HasVariants        bool                 `json:"has_variants"`
+	VariantCount       int64                `json:"variant_count"`
+	PackSize           *int                 `json:"pack_size"`
+	CurrentPrice       *decimal.Decimal     `json:"current_price"`
+	PreviousPrice      *decimal.Decimal     `json:"previous_price"`
+	PricePerUnit       *decimal.Decimal     `json:"price_per_unit"`
+	PriceDirection     money.PriceDirection `json:"price_direction"`
+	PriceLastChangedAt *time.Time           `json:"price_last_changed_at"`
+	VendorSideCategory *string              `json:"vendor_side_category"`
+}
+
+func toListingSummary(
+	listingRow database.VendorListing,
+	variantCount int64,
+) listingSummaryResponse {
+	currentPrice := database.DecimalValue(listingRow.CurrentPrice)
+	previousPrice := database.DecimalValue(listingRow.PreviousPrice)
+	packSize := database.IntValue(listingRow.PackSize)
+
+	return listingSummaryResponse{
+		VendorListingID: listingRow.VendorListingID,
+		ListingName:     listingRow.ListingName,
+		ProductURL:      listingRow.ProductUrl,
+		PrimaryImageURL: database.TextValue(listingRow.PrimaryImageUrl),
+		IsInStock:       listingRow.IsInStock,
+		IsDelisted:      listingRow.IsDelisted,
+		IsTracked:       listingRow.IsTracked,
+		HasVariants:     listingRow.HasVariants,
+		VariantCount:    variantCount,
+		PackSize:        packSize,
+		CurrentPrice:    currentPrice,
+		PreviousPrice:   previousPrice,
+		// BR-5: the headline price large, this one small beneath it.
+		PricePerUnit: money.PerUnit(currentPrice, packSize),
+		// BR-16, decided here rather than in the client so every view that
+		// shows an arrow agrees on what it means.
+		PriceDirection:     money.DirectionOf(currentPrice, previousPrice),
+		PriceLastChangedAt: database.TimeValue(listingRow.PriceLastChangedAt),
+		VendorSideCategory: database.TextValue(listingRow.VendorSideCategory),
+	}
+}
+
+// P1-A. Out-of-stock and delisted listings are returned like any other; the
+// query parameters exist so the user can filter them out deliberately, never
+// so the system hides them (BR-15).
+func (server *Server) handleListVendorListings(context *gin.Context) {
+	vendorRow, err := server.queries.GetVendorBySlug(context, context.Param("vendorSlug"))
+	if err != nil {
+		server.respondDatabaseError(context, err, "vendor")
+		return
+	}
+
+	pageSize := parseIntQuery(context, "limit", 60, 1, 250)
+	pageOffset := parseIntQuery(context, "offset", 0, 0, 1_000_000)
+	inStockOnly := parseBoolQuery(context, "in_stock_only", false)
+	includeDelisted := parseBoolQuery(context, "include_delisted", false)
+	searchText := context.Query("search")
+
+	totalCount, err := server.queries.CountVendorListings(context, database.CountVendorListingsParams{
+		VendorID:        vendorRow.VendorID,
+		InStockOnly:     inStockOnly,
+		IncludeDelisted: includeDelisted,
+		SearchText:      searchText,
+	})
+	if err != nil {
+		server.respondDatabaseError(context, err, "listings")
+		return
+	}
+
+	listingRows, err := server.queries.ListVendorListings(context, database.ListVendorListingsParams{
+		VendorID:        vendorRow.VendorID,
+		InStockOnly:     inStockOnly,
+		IncludeDelisted: includeDelisted,
+		SearchText:      searchText,
+		ResultLimit:     int32(pageSize),
+		ResultOffset:    int32(pageOffset),
+	})
+	if err != nil {
+		server.respondDatabaseError(context, err, "listings")
+		return
+	}
+
+	listingSummaries := make([]listingSummaryResponse, 0, len(listingRows))
+	for _, listingRow := range listingRows {
+		listingSummaries = append(listingSummaries, toListingSummary(database.VendorListing{
+			VendorListingID:    listingRow.VendorListingID,
+			VendorID:           listingRow.VendorID,
+			ProductUrl:         listingRow.ProductUrl,
+			ListingName:        listingRow.ListingName,
+			PrimaryImageUrl:    listingRow.PrimaryImageUrl,
+			VendorSideCategory: listingRow.VendorSideCategory,
+			IsInStock:          listingRow.IsInStock,
+			HasVariants:        listingRow.HasVariants,
+			IsTracked:          listingRow.IsTracked,
+			IsDelisted:         listingRow.IsDelisted,
+			PackSize:           listingRow.PackSize,
+			CurrentPrice:       listingRow.CurrentPrice,
+			PreviousPrice:      listingRow.PreviousPrice,
+			PriceLastChangedAt: listingRow.PriceLastChangedAt,
+		}, listingRow.VariantCount))
+	}
+
+	context.JSON(http.StatusOK, gin.H{
+		"vendor":      toVendorResponse(vendorRow),
+		"listings":    listingSummaries,
+		"total_count": totalCount,
+		"limit":       pageSize,
+		"offset":      pageOffset,
+	})
+}
+
+type pricePointResponse struct {
+	Date  string          `json:"date"`
+	Price decimal.Decimal `json:"price"`
+}
+
+type moqTierResponse struct {
+	QuantityRangeMinimum int              `json:"quantity_range_minimum"`
+	QuantityRangeMaximum *int             `json:"quantity_range_maximum"`
+	PricePerUnit         decimal.Decimal  `json:"price_per_unit"`
+	DiscountPercent      *decimal.Decimal `json:"discount_percent"`
+}
+
+type variantResponse struct {
+	VariantID      uuid.UUID            `json:"variant_id"`
+	VariantLabel   string               `json:"variant_label"`
+	VariantSKU     *string              `json:"variant_sku"`
+	IsInStock      bool                 `json:"is_in_stock"`
+	IsDelisted     bool                 `json:"is_delisted"`
+	PackSize       *int                 `json:"pack_size"`
+	CurrentPrice   *decimal.Decimal     `json:"current_price"`
+	PreviousPrice  *decimal.Decimal     `json:"previous_price"`
+	PricePerUnit   *decimal.Decimal     `json:"price_per_unit"`
+	PriceDirection money.PriceDirection `json:"price_direction"`
+	MoqTiers       []moqTierResponse    `json:"moq_tiers"`
+	PriceHistory   []pricePointResponse `json:"price_history"`
+}
+
+type pastOrderResponse struct {
+	OrderItemID  uuid.UUID        `json:"order_item_id"`
+	OrderEntryID uuid.UUID        `json:"order_entry_id"`
+	OrderedOn    string           `json:"ordered_on"`
+	EntryName    *string          `json:"entry_name"`
+	VariantLabel *string          `json:"variant_label"`
+	Quantity     int32            `json:"quantity"`
+	PricePerUnit decimal.Decimal  `json:"price_per_unit"`
+	OrderStatus  string           `json:"order_status"`
+	RefundAmount *decimal.Decimal `json:"refund_amount"`
+	Rating       *int             `json:"rating"`
+}
+
+type listingDetailResponse struct {
+	listingSummaryResponse
+	Description   *string              `json:"description"`
+	VendorSideSKU *string              `json:"vendor_side_sku"`
+	Vendor        vendorResponse       `json:"vendor"`
+	Variants      []variantResponse    `json:"variants"`
+	MoqTiers      []moqTierResponse    `json:"moq_tiers"`
+	PriceHistory  []pricePointResponse `json:"price_history"`
+	AverageRating decimal.Decimal      `json:"average_rating"`
+	RatingCount   int64                `json:"rating_count"`
+	PastOrders    []pastOrderResponse  `json:"past_orders"`
+}
+
+// P1-B. Pricing and history hang off variants when there are any, and off the
+// listing itself when there are none (BR-4).
+func (server *Server) handleGetListing(context *gin.Context) {
+	listingID, ok := parseUUIDParam(context, "listingID")
+	if !ok {
+		return
+	}
+
+	listingRow, err := server.queries.GetVendorListingByID(context, listingID)
+	if err != nil {
+		server.respondDatabaseError(context, err, "listing")
+		return
+	}
+	vendorRow, err := server.queries.GetVendorByID(context, listingRow.VendorID)
+	if err != nil {
+		server.respondDatabaseError(context, err, "vendor")
+		return
+	}
+
+	response := listingDetailResponse{
+		listingSummaryResponse: toListingSummary(listingRow, 0),
+		Description:            database.TextValue(listingRow.Description),
+		VendorSideSKU:          database.TextValue(listingRow.VendorSideSku),
+		Vendor:                 toVendorResponse(vendorRow),
+		Variants:               []variantResponse{},
+		MoqTiers:               []moqTierResponse{},
+		PriceHistory:           []pricePointResponse{},
+		PastOrders:             []pastOrderResponse{},
+	}
+
+	if listingRow.HasVariants {
+		variantRows, err := server.queries.ListVariantsForListing(context, listingID)
+		if err != nil {
+			server.respondDatabaseError(context, err, "variants")
+			return
+		}
+		response.VariantCount = int64(len(variantRows))
+
+		for _, variantRow := range variantRows {
+			variantDetail, err := server.buildVariantResponse(context, variantRow)
+			if err != nil {
+				server.respondDatabaseError(context, err, "variant detail")
+				return
+			}
+			response.Variants = append(response.Variants, variantDetail)
+		}
+	} else {
+		tierRows, err := server.queries.ListMoqTiersForListing(context, database.NullUUID(listingID))
+		if err != nil {
+			server.respondDatabaseError(context, err, "moq tiers")
+			return
+		}
+		response.MoqTiers = toMoqTierResponses(tierRows)
+
+		historyRows, err := server.queries.ListPriceHistoryForListing(context, database.NullUUID(listingID))
+		if err != nil {
+			server.respondDatabaseError(context, err, "price history")
+			return
+		}
+		response.PriceHistory = make([]pricePointResponse, 0, len(historyRows))
+		for _, historyRow := range historyRows {
+			response.PriceHistory = append(response.PriceHistory, pricePointResponse{
+				Date:  database.DateValue(historyRow.ScrapedAtDate).Format(time.DateOnly),
+				Price: historyRow.Price,
+			})
+		}
+	}
+
+	// BR-8a: computed from order-item ratings, never stored.
+	ratingRow, err := server.queries.GetListingAggregateRating(context, database.NullUUID(listingID))
+	if err != nil {
+		server.respondDatabaseError(context, err, "rating")
+		return
+	}
+	response.AverageRating = ratingRow.AverageRating
+	response.RatingCount = ratingRow.RatingCount
+
+	// FR-P1-9: every past purchase of this listing.
+	pastOrderRows, err := server.queries.ListOrderItemsForListing(context, database.NullUUID(listingID))
+	if err != nil {
+		server.respondDatabaseError(context, err, "past orders")
+		return
+	}
+	for _, pastOrderRow := range pastOrderRows {
+		response.PastOrders = append(response.PastOrders, pastOrderResponse{
+			OrderItemID:  pastOrderRow.OrderItemID,
+			OrderEntryID: pastOrderRow.OrderEntryID,
+			OrderedOn:    database.DateValue(pastOrderRow.OrderedOn).Format(time.DateOnly),
+			EntryName:    database.TextValue(pastOrderRow.EntryName),
+			VariantLabel: database.TextValue(pastOrderRow.VariantLabel),
+			Quantity:     pastOrderRow.Quantity,
+			PricePerUnit: pastOrderRow.PricePerUnit,
+			OrderStatus:  pastOrderRow.OrderStatus,
+			RefundAmount: database.DecimalValue(pastOrderRow.RefundAmount),
+			Rating:       database.IntValue(pastOrderRow.Rating),
+		})
+	}
+
+	context.JSON(http.StatusOK, response)
+}
+
+func (server *Server) buildVariantResponse(
+	context *gin.Context,
+	variantRow database.Variant,
+) (variantResponse, error) {
+	currentPrice := database.DecimalValue(variantRow.CurrentPrice)
+	previousPrice := database.DecimalValue(variantRow.PreviousPrice)
+	packSize := database.IntValue(variantRow.PackSize)
+
+	tierRows, err := server.queries.ListMoqTiersForVariant(context,
+		database.NullUUID(variantRow.VariantID))
+	if err != nil {
+		return variantResponse{}, err
+	}
+	historyRows, err := server.queries.ListPriceHistoryForVariant(context,
+		database.NullUUID(variantRow.VariantID))
+	if err != nil {
+		return variantResponse{}, err
+	}
+
+	pricePoints := make([]pricePointResponse, 0, len(historyRows))
+	for _, historyRow := range historyRows {
+		pricePoints = append(pricePoints, pricePointResponse{
+			Date:  database.DateValue(historyRow.ScrapedAtDate).Format(time.DateOnly),
+			Price: historyRow.Price,
+		})
+	}
+
+	return variantResponse{
+		VariantID:      variantRow.VariantID,
+		VariantLabel:   variantRow.VariantLabel,
+		VariantSKU:     database.TextValue(variantRow.VariantSku),
+		IsInStock:      variantRow.IsInStock,
+		IsDelisted:     variantRow.IsDelisted,
+		PackSize:       packSize,
+		CurrentPrice:   currentPrice,
+		PreviousPrice:  previousPrice,
+		PricePerUnit:   money.PerUnit(currentPrice, packSize),
+		PriceDirection: money.DirectionOf(currentPrice, previousPrice),
+		MoqTiers:       toMoqTierResponses(tierRows),
+		PriceHistory:   pricePoints,
+	}, nil
+}
+
+func toMoqTierResponses(tierRows []database.MoqTier) []moqTierResponse {
+	tiers := make([]moqTierResponse, 0, len(tierRows))
+	for _, tierRow := range tierRows {
+		tiers = append(tiers, moqTierResponse{
+			QuantityRangeMinimum: int(tierRow.QuantityRangeMinimum),
+			QuantityRangeMaximum: database.IntValue(tierRow.QuantityRangeMaximum),
+			PricePerUnit:         tierRow.PricePerUnit,
+			DiscountPercent:      database.DecimalValue(tierRow.DiscountPercent),
+		})
+	}
+	return tiers
+}
+
+type setTrackedRequest struct {
+	IsTracked *bool `json:"is_tracked"`
+}
+
+// The star. Turning it on is what makes the scraper start recording this
+// listing's MOQ tiers and daily price history.
+func (server *Server) handleSetListingTracked(context *gin.Context) {
+	listingID, ok := parseUUIDParam(context, "listingID")
+	if !ok {
+		return
+	}
+	var request setTrackedRequest
+	if err := context.ShouldBindJSON(&request); err != nil || request.IsTracked == nil {
+		respondError(context, http.StatusBadRequest, "is_tracked must be true or false")
+		return
+	}
+
+	listingRow, err := server.queries.SetListingTracked(context, database.SetListingTrackedParams{
+		VendorListingID: listingID,
+		IsTracked:       *request.IsTracked,
+	})
+	if err != nil {
+		server.respondDatabaseError(context, err, "listing")
+		return
+	}
+	context.JSON(http.StatusOK, toListingSummary(listingRow, 0))
+}
+
+func (server *Server) handleListTrackedListings(context *gin.Context) {
+	trackedRows, err := server.queries.ListTrackedListings(context)
+	if err != nil {
+		server.respondDatabaseError(context, err, "tracked listings")
+		return
+	}
+
+	type trackedListingResponse struct {
+		listingSummaryResponse
+		VendorName string `json:"vendor_name"`
+		VendorSlug string `json:"vendor_slug"`
+	}
+
+	responses := make([]trackedListingResponse, 0, len(trackedRows))
+	for _, trackedRow := range trackedRows {
+		responses = append(responses, trackedListingResponse{
+			listingSummaryResponse: toListingSummary(database.VendorListing{
+				VendorListingID:    trackedRow.VendorListingID,
+				VendorID:           trackedRow.VendorID,
+				ProductUrl:         trackedRow.ProductUrl,
+				ListingName:        trackedRow.ListingName,
+				PrimaryImageUrl:    trackedRow.PrimaryImageUrl,
+				VendorSideCategory: trackedRow.VendorSideCategory,
+				IsInStock:          trackedRow.IsInStock,
+				HasVariants:        trackedRow.HasVariants,
+				IsTracked:          trackedRow.IsTracked,
+				IsDelisted:         trackedRow.IsDelisted,
+				PackSize:           trackedRow.PackSize,
+				CurrentPrice:       trackedRow.CurrentPrice,
+				PreviousPrice:      trackedRow.PreviousPrice,
+				PriceLastChangedAt: trackedRow.PriceLastChangedAt,
+			}, trackedRow.VariantCount),
+			VendorName: trackedRow.VendorName,
+			VendorSlug: trackedRow.VendorSlug,
+		})
+	}
+	context.JSON(http.StatusOK, gin.H{"listings": responses})
+}

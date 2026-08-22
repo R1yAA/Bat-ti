@@ -1,0 +1,70 @@
+import { lazy } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./components/AppShell";
+
+// Routes are split so the charting library — by far the largest dependency —
+// is fetched only when a page that draws a chart is opened. This is a phone
+// app on mobile data; the first screen should not carry the whole bundle.
+// AppShell holds the Suspense boundary these resolve inside.
+const VendorsPage = lazy(() =>
+  import("./pages/VendorsPage").then((module) => ({
+    default: module.VendorsPage,
+  })),
+);
+const ListingPage = lazy(() =>
+  import("./pages/ListingPage").then((module) => ({
+    default: module.ListingPage,
+  })),
+);
+const CompareListPage = lazy(() =>
+  import("./pages/ComparePage").then((module) => ({
+    default: module.CompareListPage,
+  })),
+);
+const CompareEntryPage = lazy(() =>
+  import("./pages/ComparePage").then((module) => ({
+    default: module.CompareEntryPage,
+  })),
+);
+const OrdersListPage = lazy(() =>
+  import("./pages/OrdersPage").then((module) => ({
+    default: module.OrdersListPage,
+  })),
+);
+const OrderDetailPage = lazy(() =>
+  import("./pages/OrdersPage").then((module) => ({
+    default: module.OrderDetailPage,
+  })),
+);
+const SpendPage = lazy(() =>
+  import("./pages/SpendPage").then((module) => ({ default: module.SpendPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((module) => ({
+    default: module.SettingsPage,
+  })),
+);
+
+export function App() {
+  return (
+    <Routes>
+      <Route element={<AppShell />}>
+        {/* P1 */}
+        <Route path="/" element={<VendorsPage />} />
+        <Route path="/vendors/:vendorSlug" element={<VendorsPage />} />
+        <Route path="/listings/:listingID" element={<ListingPage />} />
+        {/* P2 */}
+        <Route path="/compare" element={<CompareListPage />} />
+        <Route path="/compare/:entryID" element={<CompareEntryPage />} />
+        {/* P3 */}
+        <Route path="/orders" element={<OrdersListPage />} />
+        <Route path="/orders/:orderEntryID" element={<OrderDetailPage />} />
+        {/* P4 */}
+        <Route path="/spend" element={<SpendPage />} />
+        {/* P5 */}
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
