@@ -10,7 +10,6 @@ import (
 	"github.com/R1yAA/Bat-ti/app/database"
 	"github.com/R1yAA/Bat-ti/app/money"
 	"github.com/R1yAA/Bat-ti/app/scraper/runner"
-	"github.com/R1yAA/Bat-ti/config"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -249,14 +248,6 @@ func (server *Server) handleGetListing(context *gin.Context) {
 		return
 	}
 
-	// Some vendors keep the sizes and their prices on the product page only.
-	// Read it before answering, so the page shows the options rather than an
-	// empty section.
-	server.refreshDetailIfStale(context, listingRow, vendorRow)
-	if refreshedRow, refreshErr := server.queries.GetVendorListingByID(context, listingID); refreshErr == nil {
-		listingRow = refreshedRow
-	}
-
 	response := listingDetailResponse{
 		listingSummaryResponse: toListingSummary(listingRow, 0),
 		Description:            database.TextValue(listingRow.Description),
@@ -463,44 +454,6 @@ func (server *Server) enrichNow(
 		return err
 	}
 	return scrapeRunner.EnrichOneListing(ctx, listingID, recordPriceHistory)
-}
-
-// detailFreshnessWindow is how long a product page's contents are reused
-// before being read again. Vendors change prices at most daily, so a few hours
-// keeps the sizes and discounts honest without fetching on every glance.
-const detailFreshnessWindow = 6 * time.Hour
-
-// refreshDetailIfStale reads the product page when it holds something the
-// catalogue feed does not and what we stored is missing or old.
-//
-// This is deliberately not gated on the star. The sizes and their prices are
-// what someone needs in order to decide whether a product is worth tracking,
-// so putting them behind tracking would hide the information the decision
-// depends on. Starring still governs price history, which is the thing that
-// genuinely has to accumulate over time.
-func (server *Server) refreshDetailIfStale(
-	context *gin.Context,
-	listingRow database.VendorListing,
-	vendorRow database.Vendor,
-) {
-	if !config.ScraperTier(vendorRow.ScraperTier).ProductPageAddsDetail() {
-		return
-	}
-	if fetchedAt := database.TimeValue(listingRow.DetailFetchedAt); fetchedAt != nil &&
-		time.Since(*fetchedAt) < detailFreshnessWindow {
-		return
-	}
-
-	enrichContext, cancelEnrich := stdcontext.WithTimeout(
-		context.Request.Context(), 20*time.Second)
-	defer cancelEnrich()
-
-	// Best effort: a vendor being slow must not stop the page rendering with
-	// whatever is already stored.
-	if err := server.enrichNow(enrichContext, listingRow.VendorListingID, false); err != nil {
-		server.logger.Warn("could not refresh listing detail",
-			"listing_id", listingRow.VendorListingID, "error", err)
-	}
 }
 
 // handleFindListingByURL resolves a pasted product link to the listing it

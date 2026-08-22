@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"time"
 
 	// Embedded zone data so the IST date used for price history is correct
@@ -179,7 +181,36 @@ type scrapeSummary struct {
 	listingsPriceChanged int
 	listingsDelisted     int
 	trackedEnriched      int
+	detailRefreshed      int
 }
+
+// detailRefreshBudgetPerRun caps how many product pages a single run reads for
+// listings the user has not starred.
+//
+// Some vendors keep sizes, their prices and the discount ladder on the product
+// page alone, so those listings show no options until the page has been read.
+// Reading every one of them in a single run would take hours — Jindeal alone
+// has over two thousand — and the job has a ninety-minute ceiling. A fixed
+// budget per run fills the catalogue in over several days and then simply
+// keeps it fresh, with the oldest read first so nothing is starved.
+const detailRefreshBudgetPerRun = 400
+
+// detailRefreshBudget returns the per-run budget, allowing DETAIL_REFRESH_BUDGET
+// to override it. Vendor sites differ in how fast they answer, so this is worth
+// tuning without a rebuild.
+func detailRefreshBudget() int32 {
+	if raw := os.Getenv("DETAIL_REFRESH_BUDGET"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			return int32(parsed)
+		}
+	}
+	return detailRefreshBudgetPerRun
+}
+
+// detailStaleAfter is when an already-read product page is worth reading
+// again. Longer than a day, because these listings are not the starred ones
+// whose prices are being followed closely.
+const detailStaleAfter = 7 * 24 * time.Hour
 
 func (runner *Runner) runOneVendor(
 	ctx context.Context,
@@ -220,6 +251,7 @@ func (runner *Runner) runOneVendor(
 		"price_changed", summary.listingsPriceChanged,
 		"delisted", summary.listingsDelisted,
 		"tracked_enriched", summary.trackedEnriched,
+		"detail_refreshed", summary.detailRefreshed,
 		"duration", time.Since(runStartedAt).Round(time.Second).String())
 	return nil
 }
@@ -352,7 +384,84 @@ func (runner *Runner) scrapeAndPersist(
 		summary.trackedEnriched++
 	}
 
+	// ── Phase C: options for everything else, a bounded slice per run ──────
+	//
+	// Starring governs price history, not whether a product's sizes are
+	// visible: the sizes are what someone needs in order to judge whether a
+	// product is worth starting to follow.
+	if vendorConfig.ScraperTier.ProductPageAddsDetail() && runner.maxListings == 0 {
+		refreshed, err := runner.refreshListingDetail(ctx, vendorRow, vendorScraper, logger)
+		if err != nil {
+			// The catalogue sync already succeeded, so this is reported rather
+			// than failing the vendor.
+			logger.Warn("could not refresh listing detail", "error", err)
+		}
+		summary.detailRefreshed = refreshed
+	}
+
 	return summary, nil
+}
+
+// refreshListingDetail reads product pages for listings whose options are
+// missing or stale, up to this run's budget.
+func (runner *Runner) refreshListingDetail(
+	ctx context.Context,
+	vendorRow database.Vendor,
+	vendorScraper scraper.VendorScraper,
+	logger *slog.Logger,
+) (int, error) {
+	pendingListings, err := runner.queries.ListListingsNeedingDetail(ctx,
+		database.ListListingsNeedingDetailParams{
+			VendorID:    vendorRow.VendorID,
+			StaleBefore: database.Timestamptz(time.Now().Add(-detailStaleAfter)),
+			ResultLimit: detailRefreshBudget(),
+		})
+	if err != nil {
+		return 0, fmt.Errorf("listing products needing detail: %w", err)
+	}
+	if len(pendingListings) == 0 {
+		return 0, nil
+	}
+
+	logger.Info("refreshing listing detail", "count", len(pendingListings))
+	scrapedOnDate := time.Now().In(runner.businessTimeLocation)
+
+	refreshedCount := 0
+	for _, listingRow := range pendingListings {
+		// Stop cleanly when the job is being shut down rather than leaving the
+		// remaining pages half-read.
+		if ctx.Err() != nil {
+			break
+		}
+
+		enrichedListing := scraper.ScrapedListing{
+			ProductURL:        listingRow.ProductUrl,
+			ExternalProductID: database.TextOrEmpty(listingRow.ExternalProductID),
+			ListingName:       listingRow.ListingName,
+			IsInStock:         listingRow.IsInStock,
+		}
+		if err := vendorScraper.EnrichListing(ctx, &enrichedListing); err != nil {
+			logger.Warn("could not read product page",
+				"product_url", listingRow.ProductUrl, "error", err)
+			continue
+		}
+
+		storedRow, err := runner.persistListing(ctx, vendorRow.VendorID, enrichedListing, time.Now())
+		if err != nil {
+			return refreshedCount, err
+		}
+		// Price history belongs to starred listings alone (D1), so it is
+		// written here only when this listing happens to be one.
+		if err := runner.persistDeepDetail(ctx, storedRow, enrichedListing,
+			scrapedOnDate, storedRow.IsTracked); err != nil {
+			return refreshedCount, err
+		}
+		if err := runner.queries.MarkListingDetailFetched(ctx, listingRow.VendorListingID); err != nil {
+			return refreshedCount, err
+		}
+		refreshedCount++
+	}
+	return refreshedCount, nil
 }
 
 // persistChunkSize is how many listings are written per set of round trips.

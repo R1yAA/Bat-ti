@@ -155,3 +155,16 @@ select * from variants where variant_id = $1;
 -- name: MarkListingDetailFetched :exec
 update vendor_listings set detail_fetched_at = now(), updated_at = now()
 where vendor_listing_id = $1;
+
+-- name: ListListingsNeedingDetail :many
+-- Listings whose product page has never been read, or was read longest ago.
+--
+-- Only some vendors keep anything on the product page, so this is called only
+-- for those. Never-read listings come first: a listing with no options at all
+-- is more wrong than one whose options are a few days old.
+select * from vendor_listings
+where vendor_id = @vendor_id
+  and not is_delisted
+  and (detail_fetched_at is null or detail_fetched_at < @stale_before)
+order by detail_fetched_at nulls first, listing_name
+limit @result_limit;

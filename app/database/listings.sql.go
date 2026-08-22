@@ -122,6 +122,69 @@ func (q *Queries) GetVendorListingsByIDs(ctx context.Context, dollar_1 []uuid.UU
 	return items, nil
 }
 
+const listListingsNeedingDetail = `-- name: ListListingsNeedingDetail :many
+select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at from vendor_listings
+where vendor_id = $1
+  and not is_delisted
+  and (detail_fetched_at is null or detail_fetched_at < $2)
+order by detail_fetched_at nulls first, listing_name
+limit $3
+`
+
+type ListListingsNeedingDetailParams struct {
+	VendorID    uuid.UUID          `json:"vendor_id"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	ResultLimit int32              `json:"result_limit"`
+}
+
+// Listings whose product page has never been read, or was read longest ago.
+//
+// Only some vendors keep anything on the product page, so this is called only
+// for those. Never-read listings come first: a listing with no options at all
+// is more wrong than one whose options are a few days old.
+func (q *Queries) ListListingsNeedingDetail(ctx context.Context, arg ListListingsNeedingDetailParams) ([]VendorListing, error) {
+	rows, err := q.db.Query(ctx, listListingsNeedingDetail, arg.VendorID, arg.StaleBefore, arg.ResultLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VendorListing{}
+	for rows.Next() {
+		var i VendorListing
+		if err := rows.Scan(
+			&i.VendorListingID,
+			&i.VendorID,
+			&i.ProductUrl,
+			&i.ExternalProductID,
+			&i.ListingName,
+			&i.Description,
+			&i.PrimaryImageUrl,
+			&i.VendorSideCategory,
+			&i.VendorSideSku,
+			&i.IsInStock,
+			&i.HasVariants,
+			&i.IsTracked,
+			&i.IsDelisted,
+			&i.DelistedAt,
+			&i.LastSeenAt,
+			&i.PackSize,
+			&i.CurrentPrice,
+			&i.PreviousPrice,
+			&i.PriceLastChangedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DetailFetchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTrackedListingsForVendor = `-- name: ListTrackedListingsForVendor :many
 select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at, detail_fetched_at from vendor_listings
 where vendor_id = $1 and is_tracked and not is_delisted
