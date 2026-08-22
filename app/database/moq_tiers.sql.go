@@ -144,6 +144,58 @@ func (q *Queries) ListMoqTiersForListing(ctx context.Context, vendorListingID uu
 	return items, nil
 }
 
+const listMoqTiersForListingWithFallback = `-- name: ListMoqTiersForListingWithFallback :many
+with cheapest_variant as (
+    select variants.variant_id
+    from variants
+    where variants.vendor_listing_id = $1
+      and not variants.is_delisted
+      and variants.current_price is not null
+    order by variants.current_price
+    limit 1
+)
+select moq_tiers.moq_tier_id, moq_tiers.vendor_listing_id, moq_tiers.variant_id, moq_tiers.quantity_range_minimum, moq_tiers.quantity_range_maximum, moq_tiers.price_per_unit, moq_tiers.discount_percent, moq_tiers.created_at
+from moq_tiers
+where moq_tiers.vendor_listing_id = $1
+   or (moq_tiers.variant_id = (select variant_id from cheapest_variant)
+       and not exists (select 1 from moq_tiers existing
+                        where existing.vendor_listing_id = $1))
+order by moq_tiers.quantity_range_minimum
+`
+
+// A listing with variants carries no tiers of its own — each variant has its
+// own ladder (BR-4). The catalogue shows such a listing at its cheapest live
+// variant's price, so the comparison table shows that same variant's ladder
+// rather than an empty cell.
+func (q *Queries) ListMoqTiersForListingWithFallback(ctx context.Context, vendorListingID uuid.NullUUID) ([]MoqTier, error) {
+	rows, err := q.db.Query(ctx, listMoqTiersForListingWithFallback, vendorListingID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MoqTier{}
+	for rows.Next() {
+		var i MoqTier
+		if err := rows.Scan(
+			&i.MoqTierID,
+			&i.VendorListingID,
+			&i.VariantID,
+			&i.QuantityRangeMinimum,
+			&i.QuantityRangeMaximum,
+			&i.PricePerUnit,
+			&i.DiscountPercent,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMoqTiersForVariant = `-- name: ListMoqTiersForVariant :many
 select moq_tier_id, vendor_listing_id, variant_id, quantity_range_minimum, quantity_range_maximum, price_per_unit, discount_percent, created_at from moq_tiers
 where variant_id = $1

@@ -216,14 +216,22 @@ export function CompareEntryPage() {
                 <CompareRow label="Per unit">
                   {members.map((member) => (
                     <ValueCell key={member.compare_entry_member_id}>
+                      {/* Only a pack has a per-unit price distinct from its
+                          price. Everything else is sold singly, so the two are
+                          the same number and saying so beats an empty dash. */}
                       {member.price_per_unit ? (
                         <>
                           {formatRupees(member.price_per_unit)}
-                          {member.pack_size && (
-                            <span className="block text-xs text-ink-faint">
-                              pack of {member.pack_size}
-                            </span>
-                          )}
+                          <span className="block text-xs text-ink-faint">
+                            pack of {member.pack_size}
+                          </span>
+                        </>
+                      ) : member.current_price ? (
+                        <>
+                          {formatRupees(member.current_price)}
+                          <span className="block text-xs text-ink-faint">
+                            sold singly
+                          </span>
                         </>
                       ) : (
                         <span className="text-ink-faint">—</span>
@@ -274,9 +282,12 @@ export function CompareEntryPage() {
                           ))}
                         </ul>
                       ) : (
-                        <span className="text-xs text-ink-faint">
-                          No tiers recorded
-                        </span>
+                        <Link
+                          to={`/listings/${member.vendor_listing_id}`}
+                          className="text-xs text-wick-700 underline underline-offset-2"
+                        >
+                          Track this product to collect its quantity discounts
+                        </Link>
                       )}
                     </ValueCell>
                   ))}
@@ -452,7 +463,13 @@ function ProductHeaderCell({
  *  added — resolving the open question in the product PRD. */
 function Sparkline({ history }: { history: CompareMember["price_history"] }) {
   if (history.length < 2) {
-    return <span className="text-xs text-ink-faint">Not enough history</span>;
+    // History accrues one row a day, and only for tracked products, so this is
+    // the normal state for a day or two rather than a failure.
+    return (
+      <span className="text-xs text-ink-faint">
+        {history.length === 0 ? "Track to record prices" : "Needs another day"}
+      </span>
+    );
   }
   const points = history.map((point) => ({ price: toNumber(point.price) }));
   const first = points[0].price;

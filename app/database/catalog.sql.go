@@ -19,7 +19,9 @@ select count(*) from vendor_listings
 where vendor_id = $1
   and (not $2::boolean or is_in_stock)
   and ($3::boolean or not is_delisted)
-  and ($4::text = '' or listing_name ilike '%' || $4::text || '%')
+  and ($4::text = ''
+        or listing_name ilike '%' || $4::text || '%'
+        or product_url ilike '%' || $4::text || '%')
 `
 
 type CountVendorListingsParams struct {
@@ -40,6 +42,74 @@ func (q *Queries) CountVendorListings(ctx context.Context, arg CountVendorListin
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const findListingByURL = `-- name: FindListingByURL :one
+select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_listings.product_url, vendor_listings.external_product_id, vendor_listings.listing_name, vendor_listings.description, vendor_listings.primary_image_url, vendor_listings.vendor_side_category, vendor_listings.vendor_side_sku, vendor_listings.is_in_stock, vendor_listings.has_variants, vendor_listings.is_tracked, vendor_listings.is_delisted, vendor_listings.delisted_at, vendor_listings.last_seen_at, vendor_listings.pack_size, vendor_listings.current_price, vendor_listings.previous_price, vendor_listings.price_last_changed_at, vendor_listings.created_at, vendor_listings.updated_at, vendors.vendor_slug, vendors.vendor_name
+from vendor_listings
+join vendors on vendors.vendor_id = vendor_listings.vendor_id
+where rtrim(vendor_listings.product_url, '/') = rtrim($1::text, '/')
+limit 1
+`
+
+type FindListingByURLRow struct {
+	VendorListingID    uuid.UUID           `json:"vendor_listing_id"`
+	VendorID           uuid.UUID           `json:"vendor_id"`
+	ProductUrl         string              `json:"product_url"`
+	ExternalProductID  pgtype.Text         `json:"external_product_id"`
+	ListingName        string              `json:"listing_name"`
+	Description        pgtype.Text         `json:"description"`
+	PrimaryImageUrl    pgtype.Text         `json:"primary_image_url"`
+	VendorSideCategory pgtype.Text         `json:"vendor_side_category"`
+	VendorSideSku      pgtype.Text         `json:"vendor_side_sku"`
+	IsInStock          bool                `json:"is_in_stock"`
+	HasVariants        bool                `json:"has_variants"`
+	IsTracked          bool                `json:"is_tracked"`
+	IsDelisted         bool                `json:"is_delisted"`
+	DelistedAt         pgtype.Timestamptz  `json:"delisted_at"`
+	LastSeenAt         pgtype.Timestamptz  `json:"last_seen_at"`
+	PackSize           pgtype.Int4         `json:"pack_size"`
+	CurrentPrice       decimal.NullDecimal `json:"current_price"`
+	PreviousPrice      decimal.NullDecimal `json:"previous_price"`
+	PriceLastChangedAt pgtype.Timestamptz  `json:"price_last_changed_at"`
+	CreatedAt          pgtype.Timestamptz  `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz  `json:"updated_at"`
+	VendorSlug         string              `json:"vendor_slug"`
+	VendorName         string              `json:"vendor_name"`
+}
+
+// Pasting a product link jumps straight to it, whichever vendor it belongs to.
+// Trailing slashes differ between what a vendor publishes and what gets copied
+// from a browser, so both sides are trimmed before comparing.
+func (q *Queries) FindListingByURL(ctx context.Context, productUrl string) (FindListingByURLRow, error) {
+	row := q.db.QueryRow(ctx, findListingByURL, productUrl)
+	var i FindListingByURLRow
+	err := row.Scan(
+		&i.VendorListingID,
+		&i.VendorID,
+		&i.ProductUrl,
+		&i.ExternalProductID,
+		&i.ListingName,
+		&i.Description,
+		&i.PrimaryImageUrl,
+		&i.VendorSideCategory,
+		&i.VendorSideSku,
+		&i.IsInStock,
+		&i.HasVariants,
+		&i.IsTracked,
+		&i.IsDelisted,
+		&i.DelistedAt,
+		&i.LastSeenAt,
+		&i.PackSize,
+		&i.CurrentPrice,
+		&i.PreviousPrice,
+		&i.PriceLastChangedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VendorSlug,
+		&i.VendorName,
+	)
+	return i, err
 }
 
 const getListingAggregateRating = `-- name: GetListingAggregateRating :one
@@ -225,7 +295,9 @@ from vendor_listings
 where vendor_id = $1
   and (not $2::boolean or is_in_stock)
   and ($3::boolean or not is_delisted)
-  and ($4::text = '' or listing_name ilike '%' || $4::text || '%')
+  and ($4::text = ''
+        or listing_name ilike '%' || $4::text || '%'
+        or product_url ilike '%' || $4::text || '%')
 order by listing_name
 limit $6 offset $5
 `

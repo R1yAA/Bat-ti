@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useVendorListings, useVendors } from "../api/queries";
+import {
+  useFindListingByURL,
+  useVendorListings,
+  useVendors,
+} from "../api/queries";
 import type { ListingSummary } from "../api/types";
 import { PageHeading } from "../components/AppShell";
 import {
@@ -25,6 +29,8 @@ export function VendorsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [offset, setOffset] = useState(0);
+  const findListingByURL = useFindListingByURL();
+  const [urlLookupMessage, setUrlLookupMessage] = useState<string | null>(null);
 
   // Typing in the search box should not fire a request per keystroke.
   useEffect(() => {
@@ -33,6 +39,33 @@ export function VendorsPage() {
       setOffset(0);
     }, 300);
     return () => clearTimeout(timer);
+  }, [searchText]);
+
+  // A pasted product link is a request for one specific product, and it may
+  // belong to a vendor other than the one being browsed — so it is resolved
+  // and navigated to rather than used as a filter.
+  useEffect(() => {
+    const trimmedSearch = searchText.trim();
+    if (!/^https?:\/\//i.test(trimmedSearch)) {
+      setUrlLookupMessage(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setUrlLookupMessage("Looking for that product…");
+      findListingByURL.mutate(trimmedSearch, {
+        onSuccess: (match) => {
+          setUrlLookupMessage(null);
+          setSearchText("");
+          navigate(`/listings/${match.vendor_listing_id}`);
+        },
+        onError: () =>
+          setUrlLookupMessage(
+            "No product in the catalogue has that link. It may not have been scraped yet.",
+          ),
+      });
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchText]);
 
   // Land on the first vendor rather than an empty screen.
@@ -98,7 +131,7 @@ export function VendorsPage() {
         <input
           value={searchText}
           onChange={(event) => setSearchText(event.target.value)}
-          placeholder="Search this vendor's catalogue"
+          placeholder="Search by name, or paste a product link"
           className="min-w-0 flex-1 rounded-xl border border-wick-200 bg-surface px-3 py-2.5 text-base outline-none placeholder:text-ink-faint focus:border-wick-500 focus:ring-2 focus:ring-wick-500/20"
         />
         <button
@@ -115,6 +148,12 @@ export function VendorsPage() {
           In stock only
         </button>
       </div>
+
+      {urlLookupMessage && (
+        <p className="mb-3 rounded-xl border border-wick-200 bg-wick-50 px-3 py-2 text-sm text-ink-soft">
+          {urlLookupMessage}
+        </p>
+      )}
 
       {listingsQuery.isError && <ErrorNotice error={listingsQuery.error} />}
       {listingsQuery.isPending && <Spinner label="Loading catalogue" />}

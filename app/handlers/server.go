@@ -62,6 +62,7 @@ func (server *Server) BuildEngine() *gin.Engine {
 	api.GET("/listings/:listingID", server.handleGetListing)
 	api.PUT("/listings/:listingID/track", server.handleSetListingTracked)
 	api.GET("/tracked-listings", server.handleListTrackedListings)
+	api.GET("/listing-by-url", server.handleFindListingByURL)
 
 	// P2 — compare entries
 	api.GET("/compare-entries", server.handleListCompareEntries)
@@ -85,6 +86,7 @@ func (server *Server) BuildEngine() *gin.Engine {
 	// P4 — spend distribution
 	api.GET("/spend-summary", server.handleSpendSummary)
 	api.GET("/spend-by-category", server.handleSpendByCategory)
+	api.GET("/spend-by-occasion", server.handleSpendByOccasion)
 	api.GET("/spend-monthly-trend", server.handleMonthlySpendTrend)
 
 	// P5 — settings

@@ -205,6 +205,12 @@ export interface CategorySpend {
   gross_spend: Decimal;
 }
 
+export interface OccasionSpend {
+  tag_name: string;
+  net_spend: Decimal;
+  gross_spend: Decimal;
+}
+
 export interface MonthlySpend {
   month: string;
   net_spend: Decimal;

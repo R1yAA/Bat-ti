@@ -16,6 +16,7 @@ import type {
   ScrapeRun,
   SpendSummary,
   CategorySpend,
+  OccasionSpend,
   TrackedListing,
   UUID,
   Vendor,
@@ -92,6 +93,19 @@ export function useTrackedListings() {
     queryKey: queryKeys.trackedListings,
     queryFn: () => api.get<{ listings: TrackedListing[] }>("/tracked-listings"),
     select: (data) => data.listings,
+  });
+}
+
+/** Resolves a pasted product link to the listing it refers to. */
+export function useFindListingByURL() {
+  return useMutation({
+    mutationFn: (productURL: string) =>
+      api.get<{
+        vendor_listing_id: UUID;
+        vendor_slug: string;
+        vendor_name: string;
+        listing_name: string;
+      }>(`/listing-by-url${queryString({ url: productURL })}`),
   });
 }
 
@@ -364,6 +378,17 @@ export function useSpendByCategory(startDate: string, endDate: string) {
         `/spend-by-category${queryString({ start_date: startDate, end_date: endDate })}`,
       ),
     select: (data) => data.categories,
+  });
+}
+
+export function useSpendByOccasion(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: [...queryKeys.spend, "by-occasion", startDate, endDate],
+    queryFn: () =>
+      api.get<{ occasions: OccasionSpend[] }>(
+        `/spend-by-occasion${queryString({ start_date: startDate, end_date: endDate })}`,
+      ),
+    select: (data) => data.occasions,
   });
 }
 

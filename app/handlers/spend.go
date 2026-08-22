@@ -104,6 +104,38 @@ func (server *Server) handleSpendByCategory(context *gin.Context) {
 	context.JSON(http.StatusOK, gin.H{"categories": categories})
 }
 
+type occasionSpendResponse struct {
+	TagName    string          `json:"tag_name"`
+	NetSpend   decimal.Decimal `json:"net_spend"`
+	GrossSpend decimal.Decimal `json:"gross_spend"`
+}
+
+// FR-P3-7 lets an order item carry an occasion — "Diwali", "wedding season" —
+// and this is the spend view of it, answering what a season actually cost.
+func (server *Server) handleSpendByOccasion(context *gin.Context) {
+	startDate, endDate, ok := parseDateRangeQuery(context)
+	if !ok {
+		return
+	}
+	occasionRows, err := server.queries.GetSpendByOccasion(context, database.GetSpendByOccasionParams{
+		StartDate: database.Date(startDate),
+		EndDate:   database.Date(endDate),
+	})
+	if err != nil {
+		server.respondDatabaseError(context, err, "spend by occasion")
+		return
+	}
+	occasions := make([]occasionSpendResponse, 0, len(occasionRows))
+	for _, occasionRow := range occasionRows {
+		occasions = append(occasions, occasionSpendResponse{
+			TagName:    occasionRow.TagName,
+			NetSpend:   occasionRow.NetSpend,
+			GrossSpend: occasionRow.GrossSpend,
+		})
+	}
+	context.JSON(http.StatusOK, gin.H{"occasions": occasions})
+}
+
 type monthlySpendResponse struct {
 	Month      string          `json:"month"`
 	NetSpend   decimal.Decimal `json:"net_spend"`

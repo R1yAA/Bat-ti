@@ -141,6 +141,79 @@ func (q *Queries) GetSpendByCategory(ctx context.Context, arg GetSpendByCategory
 	return items, nil
 }
 
+const getSpendByOccasion = `-- name: GetSpendByOccasion :many
+with scoped_items as (
+    select order_items.order_item_id,
+           case
+               when order_items.order_status = 'placed'
+                   then order_items.quantity * order_items.price_per_unit
+               when order_items.order_status = 'partially_refunded'
+                   then (order_items.quantity * order_items.price_per_unit)
+                        - coalesce(order_items.refund_amount, 0)
+               else 0
+           end as net_amount,
+           order_items.quantity * order_items.price_per_unit as gross_amount
+    from order_items
+    join order_entries on order_entries.order_entry_id = order_items.order_entry_id
+    where order_entries.ordered_on between $1 and $2
+),
+tag_counts as (
+    select scoped_items.order_item_id,
+           scoped_items.net_amount,
+           scoped_items.gross_amount,
+           greatest(count(order_item_occasion_tags.occasion_tag_id), 1) as tag_count
+    from scoped_items
+    left join order_item_occasion_tags
+           on order_item_occasion_tags.order_item_id = scoped_items.order_item_id
+    group by scoped_items.order_item_id, scoped_items.net_amount, scoped_items.gross_amount
+)
+select coalesce(occasion_tags.tag_name, 'Untagged')::text as tag_name,
+       sum(tag_counts.net_amount / tag_counts.tag_count)::numeric(14, 2)   as net_spend,
+       sum(tag_counts.gross_amount / tag_counts.tag_count)::numeric(14, 2) as gross_spend
+from tag_counts
+left join order_item_occasion_tags
+       on order_item_occasion_tags.order_item_id = tag_counts.order_item_id
+left join occasion_tags on occasion_tags.occasion_tag_id = order_item_occasion_tags.occasion_tag_id
+group by coalesce(occasion_tags.tag_name, 'Untagged')
+order by net_spend desc
+`
+
+type GetSpendByOccasionParams struct {
+	StartDate pgtype.Date `json:"start_date"`
+	EndDate   pgtype.Date `json:"end_date"`
+}
+
+type GetSpendByOccasionRow struct {
+	TagName    string          `json:"tag_name"`
+	NetSpend   decimal.Decimal `json:"net_spend"`
+	GrossSpend decimal.Decimal `json:"gross_spend"`
+}
+
+// The occasion counterpart of GetSpendByCategory, and it splits a multi-tagged
+// item the same way: counting an item in full under each of its tags would
+// make the chart total more than was actually spent. Items with no occasion
+// tag are reported under "Untagged" rather than dropped, so the chart still
+// adds up to the period's spend.
+func (q *Queries) GetSpendByOccasion(ctx context.Context, arg GetSpendByOccasionParams) ([]GetSpendByOccasionRow, error) {
+	rows, err := q.db.Query(ctx, getSpendByOccasion, arg.StartDate, arg.EndDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetSpendByOccasionRow{}
+	for rows.Next() {
+		var i GetSpendByOccasionRow
+		if err := rows.Scan(&i.TagName, &i.NetSpend, &i.GrossSpend); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSpendSummary = `-- name: GetSpendSummary :one
 
 select

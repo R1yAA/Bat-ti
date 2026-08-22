@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/R1yAA/Bat-ti/app/database"
@@ -408,6 +410,36 @@ func (server *Server) handleSetListingTracked(context *gin.Context) {
 		return
 	}
 	context.JSON(http.StatusOK, toListingSummary(listingRow, 0))
+}
+
+// handleFindListingByURL resolves a pasted product link to the listing it
+// refers to. The query string carries the URL rather than the path, so a link
+// full of slashes needs no escaping by the caller.
+func (server *Server) handleFindListingByURL(context *gin.Context) {
+	requestedURL := strings.TrimSpace(context.Query("url"))
+	if requestedURL == "" {
+		respondError(context, http.StatusBadRequest, "url is required")
+		return
+	}
+	// Everything after the path is tracking noise a vendor never publishes as
+	// part of the product's address.
+	if parsedURL, err := url.Parse(requestedURL); err == nil {
+		parsedURL.RawQuery = ""
+		parsedURL.Fragment = ""
+		requestedURL = parsedURL.String()
+	}
+
+	listingRow, err := server.queries.FindListingByURL(context, requestedURL)
+	if err != nil {
+		server.respondDatabaseError(context, err, "listing for that link")
+		return
+	}
+	context.JSON(http.StatusOK, gin.H{
+		"vendor_listing_id": listingRow.VendorListingID,
+		"vendor_slug":       listingRow.VendorSlug,
+		"vendor_name":       listingRow.VendorName,
+		"listing_name":      listingRow.ListingName,
+	})
 }
 
 func (server *Server) handleListTrackedListings(context *gin.Context) {

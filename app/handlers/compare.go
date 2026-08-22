@@ -204,7 +204,8 @@ func (server *Server) handleGetCompareEntry(context *gin.Context) {
 			member.CurrentPrice = database.DecimalValue(memberRow.ListingCurrentPrice)
 
 			listingKey := database.NullUUID(memberRow.VendorListingID)
-			tierRows, err := server.queries.ListMoqTiersForListing(context, listingKey)
+			tierRows, err := server.queries.ListMoqTiersForListingWithFallback(
+				context, listingKey)
 			if err != nil {
 				server.respondDatabaseError(context, err, "moq tiers")
 				return

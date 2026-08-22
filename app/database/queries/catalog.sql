@@ -5,7 +5,9 @@ select count(*) from vendor_listings
 where vendor_id = @vendor_id
   and (not @in_stock_only::boolean or is_in_stock)
   and (@include_delisted::boolean or not is_delisted)
-  and (@search_text::text = '' or listing_name ilike '%' || @search_text::text || '%');
+  and (@search_text::text = ''
+        or listing_name ilike '%' || @search_text::text || '%'
+        or product_url ilike '%' || @search_text::text || '%');
 
 -- name: ListVendorListings :many
 -- The catalogue never hides an out-of-stock or delisted listing on its own
@@ -21,7 +23,9 @@ from vendor_listings
 where vendor_id = @vendor_id
   and (not @in_stock_only::boolean or is_in_stock)
   and (@include_delisted::boolean or not is_delisted)
-  and (@search_text::text = '' or listing_name ilike '%' || @search_text::text || '%')
+  and (@search_text::text = ''
+        or listing_name ilike '%' || @search_text::text || '%'
+        or product_url ilike '%' || @search_text::text || '%')
 order by listing_name
 limit @result_limit offset @result_offset;
 
@@ -55,3 +59,13 @@ from vendor_listings
 join vendors on vendors.vendor_id = vendor_listings.vendor_id
 where vendor_listings.is_tracked and not vendor_listings.is_delisted
 order by vendors.vendor_name, vendor_listings.listing_name;
+
+-- name: FindListingByURL :one
+-- Pasting a product link jumps straight to it, whichever vendor it belongs to.
+-- Trailing slashes differ between what a vendor publishes and what gets copied
+-- from a browser, so both sides are trimmed before comparing.
+select vendor_listings.*, vendors.vendor_slug, vendors.vendor_name
+from vendor_listings
+join vendors on vendors.vendor_id = vendor_listings.vendor_id
+where rtrim(vendor_listings.product_url, '/') = rtrim(@product_url::text, '/')
+limit 1;
