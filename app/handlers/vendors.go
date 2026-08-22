@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	stdcontext "context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/R1yAA/Bat-ti/app/database"
 	"github.com/R1yAA/Bat-ti/app/money"
-	"github.com/R1yAA/Bat-ti/app/scraper/runner"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -120,12 +118,14 @@ func (server *Server) handleListVendorListings(context *gin.Context) {
 	pageSize := parseIntQuery(context, "limit", 60, 1, 250)
 	pageOffset := parseIntQuery(context, "offset", 0, 0, 1_000_000)
 	inStockOnly := parseBoolQuery(context, "in_stock_only", false)
+	trackedOnly := parseBoolQuery(context, "tracked_only", false)
 	includeDelisted := parseBoolQuery(context, "include_delisted", false)
 	searchText := context.Query("search")
 
 	totalCount, err := server.queries.CountVendorListings(context, database.CountVendorListingsParams{
 		VendorID:        vendorRow.VendorID,
 		InStockOnly:     inStockOnly,
+		TrackedOnly:     trackedOnly,
 		IncludeDelisted: includeDelisted,
 		SearchText:      searchText,
 	})
@@ -137,6 +137,7 @@ func (server *Server) handleListVendorListings(context *gin.Context) {
 	listingRows, err := server.queries.ListVendorListings(context, database.ListVendorListingsParams{
 		VendorID:        vendorRow.VendorID,
 		InStockOnly:     inStockOnly,
+		TrackedOnly:     trackedOnly,
 		IncludeDelisted: includeDelisted,
 		SearchText:      searchText,
 		ResultLimit:     int32(pageSize),
@@ -412,48 +413,11 @@ func (server *Server) handleSetListingTracked(context *gin.Context) {
 		return
 	}
 
-	response := gin.H{"listing": toListingSummary(listingRow, 0)}
-
-	// Starring is otherwise invisible until the next nightly run, which makes
-	// the feature look broken: the quantity discounts it exists to collect
-	// would not appear for a day. Fetching the page now closes that gap.
-	//
-	// It is best effort. The star is already saved, and a vendor being slow or
-	// unreachable must not undo the user's action — the nightly run will pick
-	// the listing up regardless.
-	if *request.IsTracked {
-		enrichContext, cancelEnrich := stdcontext.WithTimeout(
-			context.Request.Context(), 25*time.Second)
-		defer cancelEnrich()
-
-		if err := server.enrichNow(enrichContext, listingID, true); err != nil {
-			server.logger.Warn("could not enrich on starring",
-				"listing_id", listingID, "error", err)
-			response["detail_status"] = "pending"
-			response["detail_message"] =
-				"Saved. Quantity discounts could not be read from the vendor just now, " +
-					"so they will arrive with the next scrape."
-		} else {
-			response["detail_status"] = "ready"
-		}
-	}
-
-	context.JSON(http.StatusOK, response)
-}
-
-// enrichNow reads one product page immediately. The runner is built per call
-// rather than held on the server: it is a cheap struct, and the API otherwise
-// has no reason to own scraping state.
-func (server *Server) enrichNow(
-	ctx stdcontext.Context,
-	listingID uuid.UUID,
-	recordPriceHistory bool,
-) error {
-	scrapeRunner, err := runner.New(server.pool, server.logger, 0)
-	if err != nil {
-		return err
-	}
-	return scrapeRunner.EnrichOneListing(ctx, listingID, recordPriceHistory)
+	// Starring records intent and nothing more. The scrape decides what to
+	// read and when; doing it here would make the request depend on a vendor
+	// site answering, and writing a listing back from a partial fetch is what
+	// erased prices before.
+	context.JSON(http.StatusOK, gin.H{"listing": toListingSummary(listingRow, 0)})
 }
 
 // handleFindListingByURL resolves a pasted product link to the listing it

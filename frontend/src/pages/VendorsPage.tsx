@@ -28,6 +28,7 @@ export function VendorsPage() {
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [trackedOnly, setTrackedOnly] = useState(false);
   const [offset, setOffset] = useState(0);
   const findListingByURL = useFindListingByURL();
   const [urlLookupMessage, setUrlLookupMessage] = useState<string | null>(null);
@@ -82,6 +83,7 @@ export function VendorsPage() {
     offset,
     search: debouncedSearch,
     inStockOnly,
+    trackedOnly,
     includeDelisted: false,
   });
 
@@ -139,13 +141,28 @@ export function VendorsPage() {
             setInStockOnly((previous) => !previous);
             setOffset(0);
           }}
+          aria-pressed={inStockOnly}
           className={`min-h-11 shrink-0 rounded-xl border px-3 text-sm font-medium transition ${
             inStockOnly
               ? "border-wick-500 bg-wick-100 text-wick-800"
               : "border-wick-200 bg-surface text-ink-soft"
           }`}
         >
-          In stock only
+          In stock
+        </button>
+        <button
+          onClick={() => {
+            setTrackedOnly((previous) => !previous);
+            setOffset(0);
+          }}
+          aria-pressed={trackedOnly}
+          className={`min-h-11 shrink-0 rounded-xl border px-3 text-sm font-medium transition ${
+            trackedOnly
+              ? "border-wick-500 bg-wick-100 text-wick-800"
+              : "border-wick-200 bg-surface text-ink-soft"
+          }`}
+        >
+          ⭐ Tracked
         </button>
       </div>
 
@@ -162,9 +179,11 @@ export function VendorsPage() {
         <EmptyState
           title="Nothing matches"
           hint={
-            debouncedSearch
-              ? `No products found for "${debouncedSearch}".`
-              : "This vendor has no products recorded yet — it may not have been scraped."
+            trackedOnly
+              ? "Nothing from this vendor is tracked yet. Open a product and tap Track price to follow it."
+              : debouncedSearch
+                ? `No products found for "${debouncedSearch}".`
+                : "This vendor has no products recorded yet — it may not have been scraped."
           }
         />
       )}

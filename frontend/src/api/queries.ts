@@ -46,6 +46,7 @@ export interface ListingFilters {
   offset: number;
   search: string;
   inStockOnly: boolean;
+  trackedOnly: boolean;
   includeDelisted: boolean;
 }
 
@@ -70,6 +71,7 @@ export function useVendorListings(vendorSlug: string, filters: ListingFilters) {
             offset: filters.offset,
             search: filters.search,
             in_stock_only: filters.inStockOnly,
+            tracked_only: filters.trackedOnly,
             include_delisted: filters.includeDelisted,
           }),
       ),
@@ -119,12 +121,9 @@ export function useSetListingTracked() {
       listingID: UUID;
       isTracked: boolean;
     }) =>
-      // Starring reads the product page there and then, so this call carries
-      // whether the quantity discounts actually arrived.
-      api.put<{
-        detail_status?: "ready" | "pending";
-        detail_message?: string;
-      }>(`/listings/${listingID}/track`, { is_tracked: isTracked }),
+      api.put<unknown>(`/listings/${listingID}/track`, {
+        is_tracked: isTracked,
+      }),
     onSuccess: (_result, variables) => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.listing(variables.listingID),

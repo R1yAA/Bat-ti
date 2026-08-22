@@ -4,6 +4,7 @@
 select count(*) from vendor_listings
 where vendor_id = @vendor_id
   and (not @in_stock_only::boolean or is_in_stock)
+  and (not @tracked_only::boolean or is_tracked)
   and (@include_delisted::boolean or not is_delisted)
   and (@search_text::text = ''
         or listing_name ilike '%' || @search_text::text || '%'
@@ -22,6 +23,7 @@ select vendor_listings.*,
 from vendor_listings
 where vendor_id = @vendor_id
   and (not @in_stock_only::boolean or is_in_stock)
+  and (not @tracked_only::boolean or is_tracked)
   and (@include_delisted::boolean or not is_delisted)
   and (@search_text::text = ''
         or listing_name ilike '%' || @search_text::text || '%'

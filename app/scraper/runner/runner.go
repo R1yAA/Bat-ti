@@ -92,6 +92,29 @@ func (runner *Runner) RunVendorBySlug(ctx context.Context, vendorSlug string) er
 	return runner.runOneVendor(ctx, vendorConfig, vendorRow)
 }
 
+// scrapedListingFromRow rebuilds a stored listing in the shape the scrapers
+// use, carrying every field forward.
+//
+// Enrichment adds variants and tier ladders; it does not re-read the name,
+// image or price. Those are persisted through the same upsert, so anything
+// left blank here would be written back as blank — which silently erased the
+// price of every listing whose product page carries no price of its own.
+// Copying the row in full keeps enrichment additive.
+func scrapedListingFromRow(listingRow database.VendorListing) scraper.ScrapedListing {
+	return scraper.ScrapedListing{
+		ProductURL:         listingRow.ProductUrl,
+		ExternalProductID:  database.TextOrEmpty(listingRow.ExternalProductID),
+		ListingName:        listingRow.ListingName,
+		Description:        database.TextOrEmpty(listingRow.Description),
+		PrimaryImageURL:    database.TextOrEmpty(listingRow.PrimaryImageUrl),
+		VendorSideCategory: database.TextOrEmpty(listingRow.VendorSideCategory),
+		VendorSideSKU:      database.TextOrEmpty(listingRow.VendorSideSku),
+		IsInStock:          listingRow.IsInStock,
+		PackSize:           database.IntValue(listingRow.PackSize),
+		BasePrice:          database.DecimalValue(listingRow.CurrentPrice),
+	}
+}
+
 // EnrichOneListing fetches one product page and stores what only that page
 // carries: the MOQ ladder, per-variant prices, and today's price-history row.
 //
@@ -123,14 +146,7 @@ func (runner *Runner) EnrichOneListing(
 		return err
 	}
 
-	// Only the product URL is needed to reach the page; everything else the
-	// enrichment discovers for itself.
-	scrapedListing := scraper.ScrapedListing{
-		ProductURL:        listingRow.ProductUrl,
-		ExternalProductID: database.TextOrEmpty(listingRow.ExternalProductID),
-		ListingName:       listingRow.ListingName,
-		IsInStock:         listingRow.IsInStock,
-	}
+	scrapedListing := scrapedListingFromRow(listingRow)
 	if err := vendorScraper.EnrichListing(ctx, &scrapedListing); err != nil {
 		return fmt.Errorf("reading %s: %w", listingRow.ProductUrl, err)
 	}
@@ -434,12 +450,7 @@ func (runner *Runner) refreshListingDetail(
 			break
 		}
 
-		enrichedListing := scraper.ScrapedListing{
-			ProductURL:        listingRow.ProductUrl,
-			ExternalProductID: database.TextOrEmpty(listingRow.ExternalProductID),
-			ListingName:       listingRow.ListingName,
-			IsInStock:         listingRow.IsInStock,
-		}
+		enrichedListing := scrapedListingFromRow(listingRow)
 		if err := vendorScraper.EnrichListing(ctx, &enrichedListing); err != nil {
 			logger.Warn("could not read product page",
 				"product_url", listingRow.ProductUrl, "error", err)

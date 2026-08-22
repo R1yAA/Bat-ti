@@ -719,6 +719,7 @@ function ListingPickerSheet({
       offset: 0,
       search: debouncedSearch,
       inStockOnly: false,
+      trackedOnly: false,
       includeDelisted: true,
     }),
     [debouncedSearch],

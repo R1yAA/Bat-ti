@@ -18,15 +18,17 @@ const countVendorListings = `-- name: CountVendorListings :one
 select count(*) from vendor_listings
 where vendor_id = $1
   and (not $2::boolean or is_in_stock)
-  and ($3::boolean or not is_delisted)
-  and ($4::text = ''
-        or listing_name ilike '%' || $4::text || '%'
-        or product_url ilike '%' || $4::text || '%')
+  and (not $3::boolean or is_tracked)
+  and ($4::boolean or not is_delisted)
+  and ($5::text = ''
+        or listing_name ilike '%' || $5::text || '%'
+        or product_url ilike '%' || $5::text || '%')
 `
 
 type CountVendorListingsParams struct {
 	VendorID        uuid.UUID `json:"vendor_id"`
 	InStockOnly     bool      `json:"in_stock_only"`
+	TrackedOnly     bool      `json:"tracked_only"`
 	IncludeDelisted bool      `json:"include_delisted"`
 	SearchText      string    `json:"search_text"`
 }
@@ -36,6 +38,7 @@ func (q *Queries) CountVendorListings(ctx context.Context, arg CountVendorListin
 	row := q.db.QueryRow(ctx, countVendorListings,
 		arg.VendorID,
 		arg.InStockOnly,
+		arg.TrackedOnly,
 		arg.IncludeDelisted,
 		arg.SearchText,
 	)
@@ -298,17 +301,19 @@ select vendor_listings.vendor_listing_id, vendor_listings.vendor_id, vendor_list
 from vendor_listings
 where vendor_id = $1
   and (not $2::boolean or is_in_stock)
-  and ($3::boolean or not is_delisted)
-  and ($4::text = ''
-        or listing_name ilike '%' || $4::text || '%'
-        or product_url ilike '%' || $4::text || '%')
+  and (not $3::boolean or is_tracked)
+  and ($4::boolean or not is_delisted)
+  and ($5::text = ''
+        or listing_name ilike '%' || $5::text || '%'
+        or product_url ilike '%' || $5::text || '%')
 order by listing_name
-limit $6 offset $5
+limit $7 offset $6
 `
 
 type ListVendorListingsParams struct {
 	VendorID        uuid.UUID `json:"vendor_id"`
 	InStockOnly     bool      `json:"in_stock_only"`
+	TrackedOnly     bool      `json:"tracked_only"`
 	IncludeDelisted bool      `json:"include_delisted"`
 	SearchText      string    `json:"search_text"`
 	ResultOffset    int32     `json:"result_offset"`
@@ -350,6 +355,7 @@ func (q *Queries) ListVendorListings(ctx context.Context, arg ListVendorListings
 	rows, err := q.db.Query(ctx, listVendorListings,
 		arg.VendorID,
 		arg.InStockOnly,
+		arg.TrackedOnly,
 		arg.IncludeDelisted,
 		arg.SearchText,
 		arg.ResultOffset,
