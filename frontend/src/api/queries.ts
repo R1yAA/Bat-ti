@@ -119,9 +119,12 @@ export function useSetListingTracked() {
       listingID: UUID;
       isTracked: boolean;
     }) =>
-      api.put<unknown>(`/listings/${listingID}/track`, {
-        is_tracked: isTracked,
-      }),
+      // Starring reads the product page there and then, so this call carries
+      // whether the quantity discounts actually arrived.
+      api.put<{
+        detail_status?: "ready" | "pending";
+        detail_message?: string;
+      }>(`/listings/${listingID}/track`, { is_tracked: isTracked }),
     onSuccess: (_result, variables) => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.listing(variables.listingID),

@@ -127,7 +127,11 @@ export function ListingPage() {
                 })
               }
             >
-              {listing.is_tracked ? "⭐ Tracking" : "☆ Track price"}
+              {setTracked.isPending
+                ? "Reading the product page…"
+                : listing.is_tracked
+                  ? "⭐ Tracking"
+                  : "☆ Track price"}
             </Button>
             <Button variant="ghost" onClick={() => setIsCompareSheetOpen(true)}>
               ⚖️ Add to compare
@@ -142,10 +146,15 @@ export function ListingPage() {
             </a>
           </div>
 
-          {!listing.is_tracked && (
+          {!listing.is_tracked && !setTracked.isPending && (
             <p className="text-xs text-ink-faint">
-              Track this to start recording its price history and quantity
-              discounts each day.
+              Track this to read its quantity discounts now, and to record a
+              price every day from here on.
+            </p>
+          )}
+          {setTracked.data?.detail_message && (
+            <p className="text-xs text-wick-700">
+              {setTracked.data.detail_message}
             </p>
           )}
         </div>

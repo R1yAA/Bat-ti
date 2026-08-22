@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	stdcontext "context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/R1yAA/Bat-ti/app/database"
 	"github.com/R1yAA/Bat-ti/app/money"
+	"github.com/R1yAA/Bat-ti/app/scraper/runner"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -409,7 +411,45 @@ func (server *Server) handleSetListingTracked(context *gin.Context) {
 		server.respondDatabaseError(context, err, "listing")
 		return
 	}
-	context.JSON(http.StatusOK, toListingSummary(listingRow, 0))
+
+	response := gin.H{"listing": toListingSummary(listingRow, 0)}
+
+	// Starring is otherwise invisible until the next nightly run, which makes
+	// the feature look broken: the quantity discounts it exists to collect
+	// would not appear for a day. Fetching the page now closes that gap.
+	//
+	// It is best effort. The star is already saved, and a vendor being slow or
+	// unreachable must not undo the user's action — the nightly run will pick
+	// the listing up regardless.
+	if *request.IsTracked {
+		enrichContext, cancelEnrich := stdcontext.WithTimeout(
+			context.Request.Context(), 25*time.Second)
+		defer cancelEnrich()
+
+		if err := server.enrichNow(enrichContext, listingID); err != nil {
+			server.logger.Warn("could not enrich on starring",
+				"listing_id", listingID, "error", err)
+			response["detail_status"] = "pending"
+			response["detail_message"] =
+				"Saved. Quantity discounts could not be read from the vendor just now, " +
+					"so they will arrive with the next scrape."
+		} else {
+			response["detail_status"] = "ready"
+		}
+	}
+
+	context.JSON(http.StatusOK, response)
+}
+
+// enrichNow reads one product page immediately. The runner is built per call
+// rather than held on the server: it is a cheap struct, and the API otherwise
+// has no reason to own scraping state.
+func (server *Server) enrichNow(ctx stdcontext.Context, listingID uuid.UUID) error {
+	scrapeRunner, err := runner.New(server.pool, server.logger, 0)
+	if err != nil {
+		return err
+	}
+	return scrapeRunner.EnrichOneListing(ctx, listingID)
 }
 
 // handleFindListingByURL resolves a pasted product link to the listing it

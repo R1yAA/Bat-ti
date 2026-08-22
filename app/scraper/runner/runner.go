@@ -90,6 +90,56 @@ func (runner *Runner) RunVendorBySlug(ctx context.Context, vendorSlug string) er
 	return runner.runOneVendor(ctx, vendorConfig, vendorRow)
 }
 
+// EnrichOneListing fetches one product page and stores what only that page
+// carries: the MOQ ladder, per-variant prices, and today's price-history row.
+//
+// It exists because starring a listing is otherwise invisible until the next
+// nightly run. Deep detail is what the star turns on, so the star should
+// deliver it straight away rather than a day later.
+func (runner *Runner) EnrichOneListing(
+	ctx context.Context,
+	vendorListingID uuid.UUID,
+) error {
+	listingRow, err := runner.queries.GetVendorListingByID(ctx, vendorListingID)
+	if err != nil {
+		return fmt.Errorf("loading the listing: %w", err)
+	}
+	vendorRow, err := runner.queries.GetVendorByID(ctx, listingRow.VendorID)
+	if err != nil {
+		return fmt.Errorf("loading its vendor: %w", err)
+	}
+	vendorConfig, err := config.FindVendorBySlug(vendorRow.VendorSlug)
+	if err != nil {
+		return err
+	}
+
+	client := httpclient.New(
+		time.Duration(vendorConfig.RequestDelaySeconds)*time.Second, runner.logger)
+	vendorScraper, err := buildVendorScraper(vendorConfig, client, runner.logger, 0)
+	if err != nil {
+		return err
+	}
+
+	// Only the product URL is needed to reach the page; everything else the
+	// enrichment discovers for itself.
+	scrapedListing := scraper.ScrapedListing{
+		ProductURL:        listingRow.ProductUrl,
+		ExternalProductID: database.TextOrEmpty(listingRow.ExternalProductID),
+		ListingName:       listingRow.ListingName,
+		IsInStock:         listingRow.IsInStock,
+	}
+	if err := vendorScraper.EnrichListing(ctx, &scrapedListing); err != nil {
+		return fmt.Errorf("reading %s: %w", listingRow.ProductUrl, err)
+	}
+
+	storedRow, err := runner.persistListing(ctx, listingRow.VendorID, scrapedListing, time.Now())
+	if err != nil {
+		return err
+	}
+	return runner.persistDeepDetail(ctx, storedRow, scrapedListing,
+		time.Now().In(runner.businessTimeLocation))
+}
+
 // RunDueVendors scrapes every vendor whose hour slot has arrived, strictly one
 // after another. Sequential execution is the point: it keeps concurrent load
 // off the vendor sites and makes a failing run easy to place in the logs.
