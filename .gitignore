@@ -1,0 +1,20 @@
+# Planning and product docs — business context, roadmap and vendor research.
+# Kept out of the repository because it is public.
+.claude/
+
+# secrets
+.env
+
+# build output
+bin/
+*.test
+
+# scraper fixtures downloaded at runtime (checked-in fixtures live under testdata/)
+tmp/
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+
+# macOS
+.DS_Store
