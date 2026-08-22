@@ -144,3 +144,6 @@ from (
 ) as sub
 where vendor_listings.vendor_listing_id = $1
   and sub.minimum_variant_price is not null;
+
+-- name: GetVariantByID :one
+select * from variants where variant_id = $1;

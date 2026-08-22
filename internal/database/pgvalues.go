@@ -52,3 +52,66 @@ func DecimalOrNull(value *decimal.Decimal) decimal.NullDecimal {
 	}
 	return decimal.NullDecimal{Decimal: *value, Valid: true}
 }
+
+// Readers, for turning stored values back into plain Go types at the API
+// boundary. pgx's null-aware types do not serialise to sensible JSON, so
+// handlers convert rather than returning database rows directly — which also
+// keeps the API's shape independent of the schema's.
+
+// TextValue returns nil for SQL NULL.
+func TextValue(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+// TextOrEmpty flattens SQL NULL to the empty string, for fields where the API
+// promises a string and absent means empty.
+func TextOrEmpty(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+// TimeValue returns nil for SQL NULL.
+func TimeValue(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+// DateValue returns the zero time for SQL NULL.
+func DateValue(value pgtype.Date) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return value.Time
+}
+
+// IntValue returns nil for SQL NULL.
+func IntValue(value pgtype.Int4) *int {
+	if !value.Valid {
+		return nil
+	}
+	converted := int(value.Int32)
+	return &converted
+}
+
+// DecimalValue returns nil for SQL NULL.
+func DecimalValue(value decimal.NullDecimal) *decimal.Decimal {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Decimal
+}
+
+// UUIDValue returns nil for SQL NULL.
+func UUIDValue(value uuid.NullUUID) *uuid.UUID {
+	if !value.Valid {
+		return nil
+	}
+	return &value.UUID
+}

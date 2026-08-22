@@ -53,3 +53,6 @@ where vendor_id = $1;
 update vendors
 set last_scrape_error = $2, updated_at = now()
 where vendor_id = $1;
+
+-- name: GetVendorByID :one
+select * from vendors where vendor_id = $1;
