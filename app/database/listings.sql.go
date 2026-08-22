@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/shopspring/decimal"
 )
 
 const getVariantByID = `-- name: GetVariantByID :one
@@ -71,6 +70,54 @@ func (q *Queries) GetVendorListingByID(ctx context.Context, vendorListingID uuid
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getVendorListingsByIDs = `-- name: GetVendorListingsByIDs :many
+select vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at from vendor_listings where vendor_listing_id = any($1::uuid[])
+`
+
+// The roll-up above rewrites price columns, so the scraper re-reads what it
+// just wrote. One query for the whole chunk rather than one per listing.
+func (q *Queries) GetVendorListingsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]VendorListing, error) {
+	rows, err := q.db.Query(ctx, getVendorListingsByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []VendorListing{}
+	for rows.Next() {
+		var i VendorListing
+		if err := rows.Scan(
+			&i.VendorListingID,
+			&i.VendorID,
+			&i.ProductUrl,
+			&i.ExternalProductID,
+			&i.ListingName,
+			&i.Description,
+			&i.PrimaryImageUrl,
+			&i.VendorSideCategory,
+			&i.VendorSideSku,
+			&i.IsInStock,
+			&i.HasVariants,
+			&i.IsTracked,
+			&i.IsDelisted,
+			&i.DelistedAt,
+			&i.LastSeenAt,
+			&i.PackSize,
+			&i.CurrentPrice,
+			&i.PreviousPrice,
+			&i.PriceLastChangedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTrackedListingsForVendor = `-- name: ListTrackedListingsForVendor :many
@@ -186,59 +233,6 @@ func (q *Queries) MarkUnseenListingsDelisted(ctx context.Context, arg MarkUnseen
 	return result.RowsAffected(), nil
 }
 
-const markUnseenVariantsDelisted = `-- name: MarkUnseenVariantsDelisted :execrows
-update variants
-set is_delisted = true, delisted_at = now(), updated_at = now()
-where vendor_listing_id = $1
-  and not is_delisted
-  and last_seen_at < $2
-`
-
-type MarkUnseenVariantsDelistedParams struct {
-	VendorListingID uuid.UUID          `json:"vendor_listing_id"`
-	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
-}
-
-func (q *Queries) MarkUnseenVariantsDelisted(ctx context.Context, arg MarkUnseenVariantsDelistedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markUnseenVariantsDelisted, arg.VendorListingID, arg.LastSeenAt)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setListingBasePriceFromVariants = `-- name: SetListingBasePriceFromVariants :exec
-update vendor_listings
-set previous_price = case
-                         when sub.minimum_variant_price is distinct from vendor_listings.current_price
-                             then vendor_listings.current_price
-                         else vendor_listings.previous_price
-                     end,
-    price_last_changed_at = case
-                         when vendor_listings.current_price is not null
-                          and sub.minimum_variant_price is distinct from vendor_listings.current_price
-                             then now()
-                         else vendor_listings.price_last_changed_at
-                     end,
-    current_price  = sub.minimum_variant_price,
-    updated_at     = now()
-from (
-    select min(current_price) as minimum_variant_price
-    from variants
-    where vendor_listing_id = $1 and not is_delisted and current_price is not null
-) as sub
-where vendor_listings.vendor_listing_id = $1
-  and sub.minimum_variant_price is not null
-`
-
-// For a listing with variants the catalogue shows "from X", so the listing's
-// own price tracks the cheapest live variant. This query owns all three price
-// columns for such listings.
-func (q *Queries) SetListingBasePriceFromVariants(ctx context.Context, vendorListingID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, setListingBasePriceFromVariants, vendorListingID)
-	return err
-}
-
 const setListingTracked = `-- name: SetListingTracked :one
 update vendor_listings
 set is_tracked = $2, updated_at = now()
@@ -253,193 +247,6 @@ type SetListingTrackedParams struct {
 
 func (q *Queries) SetListingTracked(ctx context.Context, arg SetListingTrackedParams) (VendorListing, error) {
 	row := q.db.QueryRow(ctx, setListingTracked, arg.VendorListingID, arg.IsTracked)
-	var i VendorListing
-	err := row.Scan(
-		&i.VendorListingID,
-		&i.VendorID,
-		&i.ProductUrl,
-		&i.ExternalProductID,
-		&i.ListingName,
-		&i.Description,
-		&i.PrimaryImageUrl,
-		&i.VendorSideCategory,
-		&i.VendorSideSku,
-		&i.IsInStock,
-		&i.HasVariants,
-		&i.IsTracked,
-		&i.IsDelisted,
-		&i.DelistedAt,
-		&i.LastSeenAt,
-		&i.PackSize,
-		&i.CurrentPrice,
-		&i.PreviousPrice,
-		&i.PriceLastChangedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertVariant = `-- name: UpsertVariant :one
-insert into variants (
-    vendor_listing_id, variant_label, external_variant_id, variant_sku,
-    is_in_stock, pack_size, current_price, last_seen_at
-) values ($1, $2, $3, $4, $5, $6, $7, now())
-on conflict (vendor_listing_id, variant_label) do update set
-    external_variant_id = coalesce(excluded.external_variant_id, variants.external_variant_id),
-    variant_sku         = coalesce(excluded.variant_sku, variants.variant_sku),
-    is_in_stock         = excluded.is_in_stock,
-    pack_size           = coalesce(excluded.pack_size, variants.pack_size),
-    previous_price      = case
-                              when excluded.current_price is distinct from variants.current_price
-                                  then variants.current_price
-                              else variants.previous_price
-                          end,
-    price_last_changed_at = case
-                              when variants.current_price is not null
-                               and excluded.current_price is distinct from variants.current_price
-                                  then now()
-                              else variants.price_last_changed_at
-                          end,
-    current_price       = excluded.current_price,
-    is_delisted         = false,
-    delisted_at         = null,
-    last_seen_at        = now(),
-    updated_at          = now()
-returning variant_id, vendor_listing_id, variant_label, external_variant_id, variant_sku, is_in_stock, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at
-`
-
-type UpsertVariantParams struct {
-	VendorListingID   uuid.UUID           `json:"vendor_listing_id"`
-	VariantLabel      string              `json:"variant_label"`
-	ExternalVariantID pgtype.Text         `json:"external_variant_id"`
-	VariantSku        pgtype.Text         `json:"variant_sku"`
-	IsInStock         bool                `json:"is_in_stock"`
-	PackSize          pgtype.Int4         `json:"pack_size"`
-	CurrentPrice      decimal.NullDecimal `json:"current_price"`
-}
-
-func (q *Queries) UpsertVariant(ctx context.Context, arg UpsertVariantParams) (Variant, error) {
-	row := q.db.QueryRow(ctx, upsertVariant,
-		arg.VendorListingID,
-		arg.VariantLabel,
-		arg.ExternalVariantID,
-		arg.VariantSku,
-		arg.IsInStock,
-		arg.PackSize,
-		arg.CurrentPrice,
-	)
-	var i Variant
-	err := row.Scan(
-		&i.VariantID,
-		&i.VendorListingID,
-		&i.VariantLabel,
-		&i.ExternalVariantID,
-		&i.VariantSku,
-		&i.IsInStock,
-		&i.IsDelisted,
-		&i.DelistedAt,
-		&i.LastSeenAt,
-		&i.PackSize,
-		&i.CurrentPrice,
-		&i.PreviousPrice,
-		&i.PriceLastChangedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertVendorListing = `-- name: UpsertVendorListing :one
-insert into vendor_listings (
-    vendor_id, product_url, external_product_id, listing_name, description,
-    primary_image_url, vendor_side_category, vendor_side_sku,
-    is_in_stock, has_variants, pack_size, current_price, last_seen_at
-) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
-on conflict (vendor_id, product_url) do update set
-    external_product_id  = coalesce(excluded.external_product_id, vendor_listings.external_product_id),
-    listing_name         = excluded.listing_name,
-    description          = coalesce(excluded.description, vendor_listings.description),
-    primary_image_url    = coalesce(excluded.primary_image_url, vendor_listings.primary_image_url),
-    vendor_side_category = coalesce(excluded.vendor_side_category, vendor_listings.vendor_side_category),
-    vendor_side_sku      = coalesce(excluded.vendor_side_sku, vendor_listings.vendor_side_sku),
-    is_in_stock          = excluded.is_in_stock,
-    has_variants         = excluded.has_variants,
-    pack_size            = coalesce(excluded.pack_size, vendor_listings.pack_size),
-    previous_price       = case
-                               when excluded.has_variants
-                                   then vendor_listings.previous_price
-                               when excluded.current_price is distinct from vendor_listings.current_price
-                                   then vendor_listings.current_price
-                               else vendor_listings.previous_price
-                           end,
-    -- A first sighting is not a price change: there was no prior price to move
-    -- away from. Requiring a non-null old value keeps this stamp meaning "the
-    -- vendor changed the price", which is how both the catalogue arrow and the
-    -- scrape metrics read it.
-    price_last_changed_at = case
-                               when excluded.has_variants
-                                   then vendor_listings.price_last_changed_at
-                               when vendor_listings.current_price is not null
-                                and excluded.current_price is distinct from vendor_listings.current_price
-                                   then now()
-                               else vendor_listings.price_last_changed_at
-                           end,
-    current_price        = case
-                               when excluded.has_variants
-                                   then vendor_listings.current_price
-                               else excluded.current_price
-                           end,
-    is_delisted          = false,
-    delisted_at          = null,
-    last_seen_at         = now(),
-    updated_at           = now()
-returning vendor_listing_id, vendor_id, product_url, external_product_id, listing_name, description, primary_image_url, vendor_side_category, vendor_side_sku, is_in_stock, has_variants, is_tracked, is_delisted, delisted_at, last_seen_at, pack_size, current_price, previous_price, price_last_changed_at, created_at, updated_at
-`
-
-type UpsertVendorListingParams struct {
-	VendorID           uuid.UUID           `json:"vendor_id"`
-	ProductUrl         string              `json:"product_url"`
-	ExternalProductID  pgtype.Text         `json:"external_product_id"`
-	ListingName        string              `json:"listing_name"`
-	Description        pgtype.Text         `json:"description"`
-	PrimaryImageUrl    pgtype.Text         `json:"primary_image_url"`
-	VendorSideCategory pgtype.Text         `json:"vendor_side_category"`
-	VendorSideSku      pgtype.Text         `json:"vendor_side_sku"`
-	IsInStock          bool                `json:"is_in_stock"`
-	HasVariants        bool                `json:"has_variants"`
-	PackSize           pgtype.Int4         `json:"pack_size"`
-	CurrentPrice       decimal.NullDecimal `json:"current_price"`
-}
-
-// Note what is deliberately absent from the update list:
-//
-//	is_tracked  — the user's star, never touched by a scrape
-//	pack_size   — coalesced, so a hand-entered value survives a scrape that
-//	              could not detect one
-//
-// Price columns are owned by whoever knows the real price:
-//   - a listing without variants prices itself here
-//   - a listing WITH variants leaves all three price columns alone, because
-//     SetListingBasePriceFromVariants derives them from the live variants.
-//     Without that guard the upsert would blank current_price on every run
-//     and the roll-up would restore it, churning previous_price and reporting
-//     a price change on every scrape.
-func (q *Queries) UpsertVendorListing(ctx context.Context, arg UpsertVendorListingParams) (VendorListing, error) {
-	row := q.db.QueryRow(ctx, upsertVendorListing,
-		arg.VendorID,
-		arg.ProductUrl,
-		arg.ExternalProductID,
-		arg.ListingName,
-		arg.Description,
-		arg.PrimaryImageUrl,
-		arg.VendorSideCategory,
-		arg.VendorSideSku,
-		arg.IsInStock,
-		arg.HasVariants,
-		arg.PackSize,
-		arg.CurrentPrice,
-	)
 	var i VendorListing
 	err := row.Scan(
 		&i.VendorListingID,

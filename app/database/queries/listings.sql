@@ -1,4 +1,4 @@
--- name: UpsertVendorListing :one
+-- name: UpsertVendorListing :batchone
 -- Note what is deliberately absent from the update list:
 --   is_tracked  — the user's star, never touched by a scrape
 --   pack_size   — coalesced, so a hand-entered value survives a scrape that
@@ -59,6 +59,11 @@ returning *;
 -- name: GetVendorListingByID :one
 select * from vendor_listings where vendor_listing_id = $1;
 
+-- name: GetVendorListingsByIDs :many
+-- The roll-up above rewrites price columns, so the scraper re-reads what it
+-- just wrote. One query for the whole chunk rather than one per listing.
+select * from vendor_listings where vendor_listing_id = any($1::uuid[]);
+
 -- name: MarkUnseenListingsDelisted :execrows
 -- Anything not touched since this run started is gone from the vendor's site.
 -- Soft delete only: price history and past orders must survive.
@@ -79,7 +84,7 @@ set is_tracked = $2, updated_at = now()
 where vendor_listing_id = $1
 returning *;
 
--- name: UpsertVariant :one
+-- name: UpsertVariant :batchexec
 insert into variants (
     vendor_listing_id, variant_label, external_variant_id, variant_sku,
     is_in_stock, pack_size, current_price, last_seen_at
@@ -104,10 +109,9 @@ on conflict (vendor_listing_id, variant_label) do update set
     is_delisted         = false,
     delisted_at         = null,
     last_seen_at        = now(),
-    updated_at          = now()
-returning *;
+    updated_at          = now();
 
--- name: MarkUnseenVariantsDelisted :execrows
+-- name: MarkUnseenVariantsDelisted :batchexec
 update variants
 set is_delisted = true, delisted_at = now(), updated_at = now()
 where vendor_listing_id = $1
@@ -119,7 +123,7 @@ select * from variants
 where vendor_listing_id = $1 and not is_delisted
 order by variant_label;
 
--- name: SetListingBasePriceFromVariants :exec
+-- name: SetListingBasePriceFromVariants :batchexec
 -- For a listing with variants the catalogue shows "from X", so the listing's
 -- own price tracks the cheapest live variant. This query owns all three price
 -- columns for such listings.

@@ -14,7 +14,6 @@ import (
 	// even on a container image carrying no system tzdata.
 	_ "time/tzdata"
 
-	"github.com/R1yAA/Bat-ti/config"
 	"github.com/R1yAA/Bat-ti/app/database"
 	"github.com/R1yAA/Bat-ti/app/scraper"
 	"github.com/R1yAA/Bat-ti/app/scraper/dotpe"
@@ -22,6 +21,7 @@ import (
 	"github.com/R1yAA/Bat-ti/app/scraper/shopify"
 	"github.com/R1yAA/Bat-ti/app/scraper/statichtml"
 	"github.com/R1yAA/Bat-ti/app/scraper/woocommerce"
+	"github.com/R1yAA/Bat-ti/config"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
@@ -229,21 +229,31 @@ func (runner *Runner) scrapeAndPersist(
 	logger.Info("catalogue fetched", "listings", len(scrapedListings))
 
 	var trackedListings []trackedListing
-	for _, scrapedListing := range scrapedListings {
-		listingRow, err := runner.persistListing(ctx, vendorRow.VendorID, scrapedListing, runStartedAt)
+	for chunkStart := 0; chunkStart < len(scrapedListings); chunkStart += persistChunkSize {
+		chunkEnd := min(chunkStart+persistChunkSize, len(scrapedListings))
+		chunk := scrapedListings[chunkStart:chunkEnd]
+
+		listingRows, err := runner.persistListings(ctx, vendorRow.VendorID, chunk, runStartedAt)
 		if err != nil {
 			return summary, err
 		}
-		if listingRow.PriceLastChangedAt.Valid &&
-			!listingRow.PriceLastChangedAt.Time.Before(runStartedAt) {
-			summary.listingsPriceChanged++
+		for index, listingRow := range listingRows {
+			if listingRow.PriceLastChangedAt.Valid &&
+				!listingRow.PriceLastChangedAt.Time.Before(runStartedAt) {
+				summary.listingsPriceChanged++
+			}
+			if listingRow.IsTracked {
+				trackedListings = append(trackedListings, trackedListing{
+					scrapedListing: chunk[index],
+					listingRow:     listingRow,
+				})
+			}
 		}
-		if listingRow.IsTracked {
-			trackedListings = append(trackedListings, trackedListing{
-				scrapedListing: scrapedListing,
-				listingRow:     listingRow,
-			})
-		}
+
+		// Without this a large vendor is half an hour of silence, which reads
+		// exactly like a hung job.
+		logger.Info("listings persisted",
+			"done", chunkEnd, "of", len(scrapedListings))
 	}
 
 	// The delisting sweep concludes "not seen this run means the vendor pulled
@@ -291,68 +301,166 @@ func (runner *Runner) scrapeAndPersist(
 	return summary, nil
 }
 
+// persistChunkSize is how many listings are written per set of round trips.
+//
+// The database is remote, so latency dominates: writing a listing one query at
+// a time cost roughly six round trips each, and a 2,800-product vendor took
+// over half an hour. Batching turns each chunk into five round trips no matter
+// how many listings it holds. The size is a balance — larger chunks amortise
+// better, but every statement in a chunk is one implicit transaction, so a
+// failure discards more work and the memory held for results grows.
+const persistChunkSize = 100
+
+// persistListings writes a chunk of listings and their variants, returning the
+// stored rows in the order they were given.
+//
+// The query order is exactly what the one-at-a-time version did — listings,
+// then variants, then the delisting sweep, then the price roll-up — because
+// each step reads what the previous one wrote. What changes is only how many
+// round trips that costs.
+func (runner *Runner) persistListings(
+	ctx context.Context,
+	vendorID uuid.UUID,
+	scrapedListings []scraper.ScrapedListing,
+	runStartedAt time.Time,
+) ([]database.VendorListing, error) {
+	if len(scrapedListings) == 0 {
+		return nil, nil
+	}
+
+	// ── 1. the listings themselves ────────────────────────────────────────
+	listingParams := make([]database.UpsertVendorListingParams, 0, len(scrapedListings))
+	for _, scrapedListing := range scrapedListings {
+		listingParams = append(listingParams, database.UpsertVendorListingParams{
+			VendorID:           vendorID,
+			ProductUrl:         scrapedListing.ProductURL,
+			ExternalProductID:  database.TextOrNull(scrapedListing.ExternalProductID),
+			ListingName:        scrapedListing.ListingName,
+			Description:        database.TextOrNull(scrapedListing.Description),
+			PrimaryImageUrl:    database.TextOrNull(scrapedListing.PrimaryImageURL),
+			VendorSideCategory: database.TextOrNull(scrapedListing.VendorSideCategory),
+			VendorSideSku:      database.TextOrNull(scrapedListing.VendorSideSKU),
+			IsInStock:          scrapedListing.IsInStock,
+			HasVariants:        scrapedListing.HasVariants(),
+			PackSize:           database.Int4OrNull(scrapedListing.PackSize),
+			CurrentPrice:       database.DecimalOrNull(scrapedListing.BasePrice),
+		})
+	}
+
+	listingRows := make([]database.VendorListing, len(scrapedListings))
+	var firstError error
+	runner.queries.UpsertVendorListing(ctx, listingParams).QueryRow(
+		func(index int, listingRow database.VendorListing, err error) {
+			if err != nil {
+				if firstError == nil {
+					firstError = fmt.Errorf("upserting listing %s: %w",
+						scrapedListings[index].ProductURL, err)
+				}
+				return
+			}
+			listingRows[index] = listingRow
+		})
+	if firstError != nil {
+		return nil, firstError
+	}
+
+	// ── 2. variants, for the listings that have them ──────────────────────
+	var variantParams []database.UpsertVariantParams
+	var listingIDsWithVariants []uuid.UUID
+	indexByListingID := map[uuid.UUID]int{}
+
+	for index, scrapedListing := range scrapedListings {
+		if !scrapedListing.HasVariants() {
+			continue
+		}
+		listingID := listingRows[index].VendorListingID
+		listingIDsWithVariants = append(listingIDsWithVariants, listingID)
+		indexByListingID[listingID] = index
+
+		for _, scrapedVariant := range scrapedListing.Variants {
+			variantParams = append(variantParams, database.UpsertVariantParams{
+				VendorListingID:   listingID,
+				VariantLabel:      scrapedVariant.VariantLabel,
+				ExternalVariantID: database.TextOrNull(scrapedVariant.ExternalVariantID),
+				VariantSku:        database.TextOrNull(scrapedVariant.VariantSKU),
+				IsInStock:         scrapedVariant.IsInStock,
+				PackSize:          database.Int4OrNull(scrapedVariant.PackSize),
+				CurrentPrice:      database.DecimalOrNull(scrapedVariant.Price),
+			})
+		}
+	}
+
+	if len(listingIDsWithVariants) == 0 {
+		return listingRows, nil
+	}
+
+	if len(variantParams) > 0 {
+		runner.queries.UpsertVariant(ctx, variantParams).Exec(func(index int, err error) {
+			if err != nil && firstError == nil {
+				firstError = fmt.Errorf("upserting variant %q: %w",
+					variantParams[index].VariantLabel, err)
+			}
+		})
+		if firstError != nil {
+			return nil, firstError
+		}
+	}
+
+	// ── 3. variants the vendor dropped, then the "from X" roll-up ─────────
+	delistParams := make([]database.MarkUnseenVariantsDelistedParams, 0, len(listingIDsWithVariants))
+	for _, listingID := range listingIDsWithVariants {
+		delistParams = append(delistParams, database.MarkUnseenVariantsDelistedParams{
+			VendorListingID: listingID,
+			LastSeenAt:      database.Timestamptz(runStartedAt),
+		})
+	}
+	runner.queries.MarkUnseenVariantsDelisted(ctx, delistParams).Exec(func(_ int, err error) {
+		if err != nil && firstError == nil {
+			firstError = fmt.Errorf("marking unseen variants delisted: %w", err)
+		}
+	})
+	if firstError != nil {
+		return nil, firstError
+	}
+
+	runner.queries.SetListingBasePriceFromVariants(ctx, listingIDsWithVariants).Exec(
+		func(_ int, err error) {
+			if err != nil && firstError == nil {
+				firstError = fmt.Errorf("rolling variant prices up to the listing: %w", err)
+			}
+		})
+	if firstError != nil {
+		return nil, firstError
+	}
+
+	// ── 4. read back what the roll-up rewrote ─────────────────────────────
+	refreshedRows, err := runner.queries.GetVendorListingsByIDs(ctx, listingIDsWithVariants)
+	if err != nil {
+		return nil, fmt.Errorf("re-reading listings after roll-up: %w", err)
+	}
+	for _, refreshedRow := range refreshedRows {
+		if index, ok := indexByListingID[refreshedRow.VendorListingID]; ok {
+			listingRows[index] = refreshedRow
+		}
+	}
+
+	return listingRows, nil
+}
+
+// persistListing writes a single listing. Phase B enriches starred listings one
+// product page at a time, so there is nothing to group there.
 func (runner *Runner) persistListing(
 	ctx context.Context,
 	vendorID uuid.UUID,
 	scrapedListing scraper.ScrapedListing,
 	runStartedAt time.Time,
 ) (database.VendorListing, error) {
-	listingRow, err := runner.queries.UpsertVendorListing(ctx, database.UpsertVendorListingParams{
-		VendorID:           vendorID,
-		ProductUrl:         scrapedListing.ProductURL,
-		ExternalProductID:  database.TextOrNull(scrapedListing.ExternalProductID),
-		ListingName:        scrapedListing.ListingName,
-		Description:        database.TextOrNull(scrapedListing.Description),
-		PrimaryImageUrl:    database.TextOrNull(scrapedListing.PrimaryImageURL),
-		VendorSideCategory: database.TextOrNull(scrapedListing.VendorSideCategory),
-		VendorSideSku:      database.TextOrNull(scrapedListing.VendorSideSKU),
-		IsInStock:          scrapedListing.IsInStock,
-		HasVariants:        scrapedListing.HasVariants(),
-		PackSize:           database.Int4OrNull(scrapedListing.PackSize),
-		CurrentPrice:       database.DecimalOrNull(scrapedListing.BasePrice),
-	})
+	listingRows, err := runner.persistListings(ctx, vendorID,
+		[]scraper.ScrapedListing{scrapedListing}, runStartedAt)
 	if err != nil {
-		return database.VendorListing{}, fmt.Errorf("upserting listing %s: %w", scrapedListing.ProductURL, err)
+		return database.VendorListing{}, err
 	}
-
-	if !scrapedListing.HasVariants() {
-		return listingRow, nil
-	}
-
-	for _, scrapedVariant := range scrapedListing.Variants {
-		if _, err := runner.queries.UpsertVariant(ctx, database.UpsertVariantParams{
-			VendorListingID:   listingRow.VendorListingID,
-			VariantLabel:      scrapedVariant.VariantLabel,
-			ExternalVariantID: database.TextOrNull(scrapedVariant.ExternalVariantID),
-			VariantSku:        database.TextOrNull(scrapedVariant.VariantSKU),
-			IsInStock:         scrapedVariant.IsInStock,
-			PackSize:          database.Int4OrNull(scrapedVariant.PackSize),
-			CurrentPrice:      database.DecimalOrNull(scrapedVariant.Price),
-		}); err != nil {
-			return database.VendorListing{}, fmt.Errorf("upserting variant %q of %s: %w",
-				scrapedVariant.VariantLabel, scrapedListing.ProductURL, err)
-		}
-	}
-
-	if _, err := runner.queries.MarkUnseenVariantsDelisted(ctx, database.MarkUnseenVariantsDelistedParams{
-		VendorListingID: listingRow.VendorListingID,
-		LastSeenAt:      database.Timestamptz(runStartedAt),
-	}); err != nil {
-		return database.VendorListing{}, fmt.Errorf("marking unseen variants delisted: %w", err)
-	}
-
-	// The catalogue shows "from X" for a listing with variants, so the
-	// listing's own price tracks the cheapest live variant.
-	if err := runner.queries.SetListingBasePriceFromVariants(ctx, listingRow.VendorListingID); err != nil {
-		return database.VendorListing{}, fmt.Errorf("rolling variant prices up to the listing: %w", err)
-	}
-
-	// Re-read so the caller sees the rolled-up price and its change stamp.
-	refreshedRow, err := runner.queries.GetVendorListingByID(ctx, listingRow.VendorListingID)
-	if err != nil {
-		return database.VendorListing{}, fmt.Errorf("re-reading listing after roll-up: %w", err)
-	}
-	return refreshedRow, nil
+	return listingRows[0], nil
 }
 
 // persistDeepDetail writes the MOQ ladder and today's price-history row for a
