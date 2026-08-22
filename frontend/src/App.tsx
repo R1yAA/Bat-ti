@@ -1,6 +1,9 @@
 import { lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useSession } from "./auth/SessionProvider";
 import { AppShell } from "./components/AppShell";
+import { Spinner } from "./components/ui";
+import { LoginPage } from "./pages/LoginPage";
 
 // Routes are split so the charting library — by far the largest dependency —
 // is fetched only when a page that draws a chart is opened. This is a phone
@@ -46,6 +49,22 @@ const SettingsPage = lazy(() =>
 );
 
 export function App() {
+  const { session, isLoading } = useSession();
+
+  // Waiting for the stored session to be read. Rendering the sign-in screen
+  // here would flash it at someone who is already signed in.
+  if (isLoading) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-surface-sunk">
+        <Spinner label="" />
+      </div>
+    );
+  }
+
+  // The gate is here rather than per route, so a page added later is private
+  // by default instead of private only if somebody remembered.
+  if (!session) return <LoginPage />;
+
   return (
     <Routes>
       <Route element={<AppShell />}>

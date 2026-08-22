@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/R1yAA/Bat-ti/internal/database"
+	"github.com/R1yAA/Bat-ti/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,14 +20,24 @@ import (
 
 // Server holds everything the handlers need.
 type Server struct {
-	pool    *pgxpool.Pool
-	queries *database.Queries
-	logger  *slog.Logger
+	pool          *pgxpool.Pool
+	queries       *database.Queries
+	logger        *slog.Logger
+	authenticator *middleware.Authenticator
 }
 
 // NewServer builds the API server.
-func NewServer(pool *pgxpool.Pool, logger *slog.Logger) *Server {
-	return &Server{pool: pool, queries: database.New(pool), logger: logger}
+func NewServer(
+	pool *pgxpool.Pool,
+	logger *slog.Logger,
+	authenticator *middleware.Authenticator,
+) *Server {
+	return &Server{
+		pool:          pool,
+		queries:       database.New(pool),
+		logger:        logger,
+		authenticator: authenticator,
+	}
 }
 
 // BuildEngine wires every route. It is a factory rather than a global so the
@@ -36,9 +47,14 @@ func (server *Server) BuildEngine() *gin.Engine {
 	engine := gin.New()
 	engine.Use(gin.Recovery(), server.requestLogger())
 
-	api := engine.Group("/api")
+	// Health sits outside the authenticated group: a platform health check has
+	// no session, and the answer reveals nothing beyond whether the database
+	// is reachable.
+	engine.GET("/api/health", server.handleHealth)
 
-	api.GET("/health", server.handleHealth)
+	// Everything else is private. This is one person's purchasing history and
+	// vendor research, so the default is closed and exceptions are explicit.
+	api := engine.Group("/api", server.authenticator.RequireUser())
 
 	// P1 — vendor catalogue and listing content page
 	api.GET("/vendors", server.handleListVendors)
