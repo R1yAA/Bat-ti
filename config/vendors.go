@@ -95,8 +95,19 @@ type VendorConfig struct {
 	ScraperTier         ScraperTier
 	ScrapeHourUTC       int // staggered slot; 23 UTC is 04:30 IST
 	RequestDelaySeconds int // politeness gap between product-page fetches
-	CatalogDiscovery    CatalogDiscovery
-	ListingSelectors    ListingSelectors
+
+	// RequestsPerSecond overrides RequestDelaySeconds when set, for vendors
+	// whose whole catalogue is read one product page at a time. Whole-second
+	// spacing costs most of an hour for a storefront of a couple of thousand
+	// products, which does not fit inside the scrape window.
+	RequestsPerSecond float64
+
+	// MaxConcurrentFetches is how many product pages may be in flight at once.
+	// Zero means one. The rate above still sets the pace; this only stops a
+	// slow response holding up the requests queued behind it.
+	MaxConcurrentFetches int
+	CatalogDiscovery     CatalogDiscovery
+	ListingSelectors     ListingSelectors
 }
 
 // TrackedVendors is the registry. Hour slots run 23 UTC through 08 UTC, one
@@ -182,6 +193,9 @@ var TrackedVendors = []VendorConfig{
 		ScraperTier:         ScraperTierDotpeJSON,
 		ScrapeHourUTC:       7,
 		RequestDelaySeconds: 2,
+		// No catalogue feed: all ~1,700 products are read page by page.
+		RequestsPerSecond:    4,
+		MaxConcurrentFetches: 6,
 		CatalogDiscovery: CatalogDiscovery{
 			SitemapURL: "https://www.plutoniousinnovations.com/sitemap_products.xml",
 		},
@@ -193,6 +207,9 @@ var TrackedVendors = []VendorConfig{
 		ScraperTier:         ScraperTierStaticHTML,
 		ScrapeHourUTC:       8,
 		RequestDelaySeconds: 2,
+		// Same shape as Plutonious: ~1,250 product pages, no feed.
+		RequestsPerSecond:    4,
+		MaxConcurrentFetches: 6,
 		CatalogDiscovery: CatalogDiscovery{
 			SitemapURL: "https://www.restokart.com/sitemap.xml",
 		},

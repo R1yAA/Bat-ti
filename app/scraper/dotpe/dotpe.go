@@ -20,10 +20,10 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/R1yAA/Bat-ti/config"
 	"github.com/R1yAA/Bat-ti/app/scraper"
 	"github.com/R1yAA/Bat-ti/app/scraper/httpclient"
 	"github.com/R1yAA/Bat-ti/app/scraper/sitemap"
+	"github.com/R1yAA/Bat-ti/config"
 	"github.com/shopspring/decimal"
 )
 
@@ -76,6 +76,11 @@ type Scraper struct {
 	// thousands of products — can be smoke-tested in seconds during
 	// development without waiting for the real thing.
 	maxListings int
+
+	// concurrentFetches is how many product pages are read at once. The
+	// client's rate limiter still sets the pace; this stops one slow response
+	// holding up the rest.
+	concurrentFetches int
 }
 
 // New builds a scraper for the storefront described by vendorConfig.
@@ -86,10 +91,11 @@ func New(
 	maxListings int,
 ) *Scraper {
 	return &Scraper{
-		vendorConfig: vendorConfig,
-		client:       client,
-		logger:       logger,
-		maxListings:  maxListings,
+		vendorConfig:      vendorConfig,
+		client:            client,
+		logger:            logger,
+		maxListings:       maxListings,
+		concurrentFetches: vendorConfig.MaxConcurrentFetches,
 	}
 }
 
@@ -117,19 +123,27 @@ func (dotpeScraper *Scraper) FetchCatalog(ctx context.Context) ([]scraper.Scrape
 		productEntries = productEntries[:dotpeScraper.maxListings]
 	}
 
-	scrapedListings := make([]scraper.ScrapedListing, 0, len(productEntries))
+	locations := make([]string, 0, len(productEntries))
 	for _, productEntry := range productEntries {
-		pageBytes, err := dotpeScraper.client.GetBytes(ctx, productEntry.Location)
-		if err != nil {
-			dotpeScraper.logger.Warn("skipping product page",
-				"url", productEntry.Location, "error", err)
+		locations = append(locations, productEntry.Location)
+	}
+	fetchedPages := sitemap.FetchPages(ctx, dotpeScraper.client, locations,
+		dotpeScraper.concurrentFetches, dotpeScraper.logger)
+
+	scrapedListings := make([]scraper.ScrapedListing, 0, len(fetchedPages))
+	for _, fetchedPage := range fetchedPages {
+		if fetchedPage.Err != nil {
+			// A vendor's sitemap outlives its products: Plutonious still lists
+			// last spring's Holi items, which now 404. Skipping is right — the
+			// delisting sweep then marks them gone.
+			dotpeScraper.logger.Debug("skipping product page",
+				"url", fetchedPage.Location, "error", fetchedPage.Err)
 			continue
 		}
-
-		scrapedListing, err := ParseProductPage(pageBytes, productEntry.Location)
+		scrapedListing, err := ParseProductPage(fetchedPage.Body, fetchedPage.Location)
 		if err != nil {
 			dotpeScraper.logger.Warn("could not parse product page",
-				"url", productEntry.Location, "error", err)
+				"url", fetchedPage.Location, "error", err)
 			continue
 		}
 		scrapedListings = append(scrapedListings, scrapedListing)

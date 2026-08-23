@@ -18,10 +18,10 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/R1yAA/Bat-ti/config"
 	"github.com/R1yAA/Bat-ti/app/scraper"
 	"github.com/R1yAA/Bat-ti/app/scraper/httpclient"
 	"github.com/R1yAA/Bat-ti/app/scraper/sitemap"
+	"github.com/R1yAA/Bat-ti/config"
 	"github.com/shopspring/decimal"
 )
 
@@ -87,28 +87,34 @@ func (staticScraper *Scraper) FetchCatalog(ctx context.Context) ([]scraper.Scrap
 		productEntries = productEntries[:staticScraper.maxListings]
 	}
 
-	scrapedListings := make([]scraper.ScrapedListing, 0, len(productEntries))
+	locations := make([]string, 0, len(productEntries))
 	for _, productEntry := range productEntries {
-		pageBytes, err := staticScraper.client.GetBytes(ctx, productEntry.Location)
-		if err != nil {
+		locations = append(locations, productEntry.Location)
+	}
+	fetchedPages := sitemap.FetchPages(ctx, staticScraper.client, locations,
+		staticScraper.vendorConfig.MaxConcurrentFetches, staticScraper.logger)
+
+	scrapedListings := make([]scraper.ScrapedListing, 0, len(fetchedPages))
+	for _, fetchedPage := range fetchedPages {
+		if fetchedPage.Err != nil {
 			// One dead product page must not abandon the whole catalogue; the
 			// listing simply is not seen this run, and the delisting sweep
 			// decides what that means.
-			staticScraper.logger.Warn("skipping product page",
-				"url", productEntry.Location, "error", err)
+			staticScraper.logger.Debug("skipping product page",
+				"url", fetchedPage.Location, "error", fetchedPage.Err)
 			continue
 		}
 
-		scrapedListing, err := ParseProductPage(pageBytes, productEntry.Location, staticScraper.vendorConfig)
+		scrapedListing, err := ParseProductPage(fetchedPage.Body, fetchedPage.Location, staticScraper.vendorConfig)
 		if errors.Is(err, ErrProductGone) {
 			// Not seen this run, so the delisting sweep will retire it.
 			staticScraper.logger.Debug("product no longer exists",
-				"url", productEntry.Location)
+				"url", fetchedPage.Location)
 			continue
 		}
 		if err != nil {
 			staticScraper.logger.Warn("could not parse product page",
-				"url", productEntry.Location, "error", err)
+				"url", fetchedPage.Location, "error", err)
 			continue
 		}
 		scrapedListings = append(scrapedListings, scrapedListing)

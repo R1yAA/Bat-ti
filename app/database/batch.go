@@ -225,8 +225,8 @@ const upsertVendorListing = `-- name: UpsertVendorListing :batchone
 insert into vendor_listings (
     vendor_id, product_url, external_product_id, listing_name, description,
     primary_image_url, vendor_side_category, vendor_side_sku,
-    is_in_stock, has_variants, pack_size, current_price, last_seen_at
-) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now())
+    is_in_stock, has_variants, pack_size, current_price, is_tracked, last_seen_at
+) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now())
 on conflict (vendor_id, product_url) do update set
     external_product_id  = coalesce(excluded.external_product_id, vendor_listings.external_product_id),
     listing_name         = excluded.listing_name,
@@ -236,6 +236,7 @@ on conflict (vendor_id, product_url) do update set
     vendor_side_sku      = coalesce(excluded.vendor_side_sku, vendor_listings.vendor_side_sku),
     is_in_stock          = excluded.is_in_stock,
     has_variants         = excluded.has_variants,
+    is_tracked           = vendor_listings.is_tracked or excluded.is_tracked,
     pack_size            = coalesce(excluded.pack_size, vendor_listings.pack_size),
     previous_price       = case
                                when excluded.has_variants
@@ -287,13 +288,18 @@ type UpsertVendorListingParams struct {
 	HasVariants        bool                `json:"has_variants"`
 	PackSize           pgtype.Int4         `json:"pack_size"`
 	CurrentPrice       decimal.NullDecimal `json:"current_price"`
+	IsTracked          bool                `json:"is_tracked"`
 }
 
 // Note what is deliberately absent from the update list:
 //
-//	is_tracked  — the user's star, never touched by a scrape
 //	pack_size   — coalesced, so a hand-entered value survives a scrape that
 //	              could not detect one
+//
+// is_tracked is or-ed rather than overwritten, so a scrape can only ever add a
+// star, never clear one. config.ShouldAutoStar decides whether a title stars
+// itself (candles, today); a listing starred by hand stays starred whatever it
+// is called.
 //
 // Price columns are owned by whoever knows the real price:
 //   - a listing without variants prices itself here
@@ -318,6 +324,7 @@ func (q *Queries) UpsertVendorListing(ctx context.Context, arg []UpsertVendorLis
 			a.HasVariants,
 			a.PackSize,
 			a.CurrentPrice,
+			a.IsTracked,
 		}
 		batch.Queue(upsertVendorListing, vals...)
 	}

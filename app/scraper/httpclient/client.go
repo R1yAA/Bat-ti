@@ -39,6 +39,20 @@ type Client struct {
 // New builds a client that spaces requests by requestDelay and retries
 // transient failures. A zero or negative requestDelay disables rate limiting.
 func New(requestDelay time.Duration, logger *slog.Logger) *Client {
+	if requestDelay <= 0 {
+		return NewWithRate(0, 1, logger)
+	}
+	return NewWithRate(1/requestDelay.Seconds(), 1, logger)
+}
+
+// NewWithRate builds a client capped at requestsPerSecond, allowing burst
+// requests to be in flight at once.
+//
+// Whole-second spacing is too coarse for a vendor that publishes no catalogue
+// feed: reading a couple of thousand product pages one per two seconds takes
+// most of an hour. A fractional rate lets each vendor be paced to what it can
+// comfortably serve. A zero or negative rate disables limiting entirely.
+func NewWithRate(requestsPerSecond float64, burst int, logger *slog.Logger) *Client {
 	retryableClient := retryablehttp.NewClient()
 	retryableClient.RetryMax = 3
 	retryableClient.RetryWaitMin = 2 * time.Second
@@ -48,11 +62,14 @@ func New(requestDelay time.Duration, logger *slog.Logger) *Client {
 	// our logger instead of stderr noise.
 	retryableClient.Logger = nil
 
+	if burst < 1 {
+		burst = 1
+	}
 	var rateLimiter *rate.Limiter
-	if requestDelay > 0 {
-		// One request per delay period, no burst: strict spacing rather than
-		// a burst followed by a stall.
-		rateLimiter = rate.NewLimiter(rate.Every(requestDelay), 1)
+	if requestsPerSecond > 0 {
+		// The burst matches how many requests may be in flight, so workers are
+		// released together rather than each waiting out the full interval.
+		rateLimiter = rate.NewLimiter(rate.Limit(requestsPerSecond), burst)
 	}
 
 	return &Client{

@@ -139,8 +139,7 @@ func (runner *Runner) EnrichOneListing(
 		return err
 	}
 
-	client := httpclient.New(
-		time.Duration(vendorConfig.RequestDelaySeconds)*time.Second, runner.logger)
+	client := newVendorClient(vendorConfig, runner.logger)
 	vendorScraper, err := buildVendorScraper(vendorConfig, client, runner.logger, 0)
 	if err != nil {
 		return err
@@ -313,10 +312,7 @@ func (runner *Runner) scrapeAndPersist(
 ) (scrapeSummary, error) {
 	var summary scrapeSummary
 
-	client := httpclient.New(
-		time.Duration(vendorConfig.RequestDelaySeconds)*time.Second,
-		logger,
-	)
+	client := newVendorClient(vendorConfig, logger)
 	vendorScraper, err := buildVendorScraper(vendorConfig, client, logger, runner.maxListings)
 	if err != nil {
 		return summary, err
@@ -396,6 +392,17 @@ func (runner *Runner) scrapeAndPersist(
 		}
 		if err := runner.persistDeepDetail(ctx, enrichedRow, enrichedListing, scrapedOnDate, true); err != nil {
 			return summary, err
+		}
+		// Phase B has just read this listing's product page, so say so. Without
+		// this the page still looks unread to phase C, whose query puts unread
+		// listings first — it would spend its whole budget re-fetching the
+		// listings phase B just did, and never reach the ones with no options
+		// at all. Harmless while a handful of listings were starred; not once a
+		// rule stars hundreds.
+		if vendorConfig.ScraperTier.ProductPageAddsDetail() {
+			if err := runner.queries.MarkListingDetailFetched(ctx, enrichedRow.VendorListingID); err != nil {
+				return summary, err
+			}
 		}
 		summary.trackedEnriched++
 	}
@@ -503,6 +510,11 @@ func (runner *Runner) persistListings(
 	}
 
 	// ── 1. the listings themselves ────────────────────────────────────────
+	//
+	// IsTracked here only ever adds a star: the upsert or-s it with what is
+	// already stored, so a listing starred by hand keeps its star whatever it
+	// is called, and one the rule matches is starred from its first sighting
+	// on — which is what puts it in phase B below, in this same run.
 	listingParams := make([]database.UpsertVendorListingParams, 0, len(scrapedListings))
 	for _, scrapedListing := range scrapedListings {
 		listingParams = append(listingParams, database.UpsertVendorListingParams{
@@ -518,6 +530,7 @@ func (runner *Runner) persistListings(
 			HasVariants:        scrapedListing.HasVariants(),
 			PackSize:           database.Int4OrNull(scrapedListing.PackSize),
 			CurrentPrice:       database.DecimalOrNull(scrapedListing.BasePrice),
+			IsTracked:          config.ShouldAutoStar(scrapedListing.ListingName),
 		})
 	}
 
@@ -740,6 +753,21 @@ func (runner *Runner) persistDeepDetail(
 		return fmt.Errorf("committing deep detail for %s: %w", listingRow.ProductUrl, err)
 	}
 	return nil
+}
+
+// newVendorClient paces requests as the vendor's entry asks. RequestsPerSecond
+// wins when set, because whole-second spacing is too coarse for the vendors
+// whose catalogue is read one page at a time.
+func newVendorClient(vendorConfig config.VendorConfig, logger *slog.Logger) *httpclient.Client {
+	if vendorConfig.RequestsPerSecond > 0 {
+		burst := vendorConfig.MaxConcurrentFetches
+		if burst < 1 {
+			burst = 1
+		}
+		return httpclient.NewWithRate(vendorConfig.RequestsPerSecond, burst, logger)
+	}
+	return httpclient.New(
+		time.Duration(vendorConfig.RequestDelaySeconds)*time.Second, logger)
 }
 
 func buildVendorScraper(
