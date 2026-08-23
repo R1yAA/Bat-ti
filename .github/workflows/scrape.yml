@@ -28,9 +28,12 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    # A full catalogue sync of the per-product tiers takes tens of minutes;
-    # this ceiling stops a hung run from burning the month's minutes.
-    timeout-minutes: 90
+    # Minutes are free on a public repository, so this ceiling is not about
+    # cost. It is about the concurrency group above: a run that hangs holds the
+    # group and every later hour queues behind it, so the schedule quietly
+    # stops. Five hours leaves room for a slow full pass while staying under
+    # GitHub's own six-hour limit for a hosted job, which cannot be raised.
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
