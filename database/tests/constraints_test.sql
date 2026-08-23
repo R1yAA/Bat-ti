@@ -12,6 +12,8 @@ declare
     fixture_listing_id       uuid;
     fixture_compare_entry_id uuid;
     fixture_order_entry_id   uuid;
+    fixture_sale_category_id uuid;
+    fixture_sale_entry_id    uuid;
     failure_count            integer := 0;
 
     procedure_note           text;
@@ -29,6 +31,13 @@ begin
 
     insert into order_entries (entry_name) values ('Fixture Order')
     returning order_entry_id into fixture_order_entry_id;
+
+    insert into sale_order_categories (category_name) values ('Fixture Sale Category')
+    returning sale_order_category_id into fixture_sale_category_id;
+
+    insert into sale_order_entries (sale_order_id, consumer_name, sale_order_category_id)
+    values (4242, 'Fixture Customer', fixture_sale_category_id)
+    returning sale_order_entry_id into fixture_sale_entry_id;
 
     -- 1 ────────────────────────────────────────────────────────────────────
     begin
@@ -157,6 +166,70 @@ begin
         raise notice 'FAIL 12  a listing referenced by an order item was deleted';
     exception when foreign_key_violation then
         raise notice 'PASS 12  deleting a listing referenced by an order item rejected';
+    end;
+
+    -- 13 ───────────────────────────────────────────────────────────────────
+    -- BR-20: a delivery date belongs to a delivered order and nowhere else.
+    begin
+        update sale_order_entries set delivered_date = current_date
+        where sale_order_entry_id = fixture_sale_entry_id;
+        failure_count := failure_count + 1;
+        raise notice 'FAIL 13  a pending sale order accepted a delivered_date';
+    exception when check_violation then
+        raise notice 'PASS 13  delivered_date on a non-delivered sale order rejected';
+    end;
+
+    -- 14 ───────────────────────────────────────────────────────────────────
+    begin
+        update sale_order_entries set order_status = 'posted'
+        where sale_order_entry_id = fixture_sale_entry_id;
+        failure_count := failure_count + 1;
+        raise notice 'FAIL 14  an unknown sale order status was accepted';
+    exception when check_violation then
+        raise notice 'PASS 14  unknown sale order status rejected';
+    end;
+
+    -- 15 ───────────────────────────────────────────────────────────────────
+    -- BR-21: the display number is what a customer is quoted, so two sales
+    -- can never carry the same one.
+    begin
+        insert into sale_order_entries (sale_order_id, consumer_name, sale_order_category_id)
+        values (4242, 'Second Fixture Customer', fixture_sale_category_id);
+        failure_count := failure_count + 1;
+        raise notice 'FAIL 15  a duplicate sale_order_id was accepted';
+    exception when unique_violation then
+        raise notice 'PASS 15  duplicate sale_order_id rejected';
+    end;
+
+    -- 16 ───────────────────────────────────────────────────────────────────
+    begin
+        insert into sale_order_entries (sale_order_id, consumer_name, sale_order_category_id)
+        values (999, 'Short Number Customer', fixture_sale_category_id);
+        failure_count := failure_count + 1;
+        raise notice 'FAIL 16  a sale_order_id below four digits was accepted';
+    exception when check_violation then
+        raise notice 'PASS 16  sale_order_id outside 1000..999999 rejected';
+    end;
+
+    -- 17 ───────────────────────────────────────────────────────────────────
+    -- BR-23 reassigns in the handler before deleting, so the database must
+    -- refuse to drop a category that still has sales pointing at it.
+    begin
+        delete from sale_order_categories
+        where sale_order_category_id = fixture_sale_category_id;
+        failure_count := failure_count + 1;
+        raise notice 'FAIL 17  a sale order category still in use was deleted';
+    exception when foreign_key_violation then
+        raise notice 'PASS 17  deleting a sale order category still in use rejected';
+    end;
+
+    -- 18 ───────────────────────────────────────────────────────────────────
+    begin
+        delete from sale_order_categories where category_name = 'Uncategorized';
+        failure_count := failure_count + 1;
+        raise notice 'FAIL 18  the Uncategorized sale order category was deleted';
+    exception when restrict_violation then
+        raise notice 'PASS 18  deleting the Uncategorized sale order category rejected';
     end;
 
     if failure_count > 0 then

@@ -123,3 +123,18 @@ const statusLabels: Record<string, string> = {
 export function formatOrderStatus(status: string): string {
   return statusLabels[status] ?? status;
 }
+
+/** BR-20. Kept apart from the purchase statuses above deliberately: the two
+ *  vocabularies overlap on "Cancelled" and nowhere else, and one shared map
+ *  would let a purchase status leak into a sale's dropdown. */
+const saleStatusLabels: Record<string, string> = {
+  pending: "Pending",
+  confirmed: "Confirmed",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
+};
+
+export function formatSaleOrderStatus(status: string): string {
+  return saleStatusLabels[status] ?? status;
+}

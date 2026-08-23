@@ -45,6 +45,16 @@ func Date(value time.Time) pgtype.Date {
 	return pgtype.Date{Time: value, Valid: true}
 }
 
+// DateOrNull maps a nil pointer to SQL NULL. A date that is only meaningful in
+// one state — a delivery date before the order is delivered — is absent rather
+// than zero, and the zero date would sort and display as year 1.
+func DateOrNull(value *time.Time) pgtype.Date {
+	if value == nil {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: *value, Valid: true}
+}
+
 // DecimalOrNull maps a nil pointer to SQL NULL.
 func DecimalOrNull(value *decimal.Decimal) decimal.NullDecimal {
 	if value == nil {
@@ -89,6 +99,15 @@ func DateValue(value pgtype.Date) time.Time {
 		return time.Time{}
 	}
 	return value.Time
+}
+
+// DatePointer returns nil for SQL NULL, for dates the API reports as absent
+// rather than flattening to the zero date the way DateValue does.
+func DatePointer(value pgtype.Date) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
 }
 
 // IntValue returns nil for SQL NULL.

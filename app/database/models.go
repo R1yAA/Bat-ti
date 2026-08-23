@@ -92,6 +92,35 @@ type PriceHistoryEntry struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
+type SaleOrderCategory struct {
+	SaleOrderCategoryID uuid.UUID          `json:"sale_order_category_id"`
+	CategoryName        string             `json:"category_name"`
+	IsSystem            bool               `json:"is_system"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type SaleOrderEntry struct {
+	SaleOrderEntryID    uuid.UUID          `json:"sale_order_entry_id"`
+	SaleOrderID         int32              `json:"sale_order_id"`
+	ConsumerName        string             `json:"consumer_name"`
+	OrderPlacedDate     pgtype.Date        `json:"order_placed_date"`
+	OrderStatus         string             `json:"order_status"`
+	DeliveredDate       pgtype.Date        `json:"delivered_date"`
+	SaleOrderCategoryID uuid.UUID          `json:"sale_order_category_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SaleOrderItem struct {
+	SaleOrderItemID  uuid.UUID          `json:"sale_order_item_id"`
+	SaleOrderEntryID uuid.UUID          `json:"sale_order_entry_id"`
+	ProductName      string             `json:"product_name"`
+	Quantity         int32              `json:"quantity"`
+	PricePerUnit     decimal.Decimal    `json:"price_per_unit"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ScrapeRun struct {
 	ScrapeRunID      uuid.UUID          `json:"scrape_run_id"`
 	VendorID         uuid.UUID          `json:"vendor_id"`

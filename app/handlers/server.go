@@ -83,11 +83,24 @@ func (server *Server) BuildEngine() *gin.Engine {
 	api.PUT("/order-items/:orderItemID", server.handleUpdateOrderItem)
 	api.DELETE("/order-items/:orderItemID", server.handleDeleteOrderItem)
 
-	// P4 — spend distribution
+	// P6 — sales orders, the sell-side mirror of P3
+	api.GET("/sale-order-entries", server.handleListSaleOrderEntries)
+	api.POST("/sale-order-entries", server.handleCreateSaleOrderEntry)
+	api.GET("/sale-order-entries/:saleOrderEntryID", server.handleGetSaleOrderEntry)
+	api.PUT("/sale-order-entries/:saleOrderEntryID", server.handleUpdateSaleOrderEntry)
+	api.DELETE("/sale-order-entries/:saleOrderEntryID", server.handleDeleteSaleOrderEntry)
+	api.POST("/sale-order-entries/:saleOrderEntryID/items", server.handleCreateSaleOrderItem)
+	api.PUT("/sale-order-items/:saleOrderItemID", server.handleUpdateSaleOrderItem)
+	api.DELETE("/sale-order-items/:saleOrderItemID", server.handleDeleteSaleOrderItem)
+
+	// P4 — spend distribution, and the sell-side figures beside it
 	api.GET("/spend-summary", server.handleSpendSummary)
 	api.GET("/spend-by-category", server.handleSpendByCategory)
 	api.GET("/spend-by-occasion", server.handleSpendByOccasion)
 	api.GET("/spend-monthly-trend", server.handleMonthlySpendTrend)
+	api.GET("/sales-summary", server.handleSalesSummary)
+	api.GET("/sales-by-category", server.handleSalesByCategory)
+	api.GET("/sales-monthly-trend", server.handleMonthlySalesTrend)
 
 	// P5 — settings
 	api.GET("/categories", server.handleListCategories)
@@ -98,6 +111,10 @@ func (server *Server) BuildEngine() *gin.Engine {
 	api.POST("/occasion-tags", server.handleCreateOccasionTag)
 	api.PUT("/occasion-tags/:tagID", server.handleRenameOccasionTag)
 	api.DELETE("/occasion-tags/:tagID", server.handleDeleteOccasionTag)
+	api.GET("/sale-order-categories", server.handleListSaleOrderCategories)
+	api.POST("/sale-order-categories", server.handleCreateSaleOrderCategory)
+	api.PUT("/sale-order-categories/:saleOrderCategoryID", server.handleRenameSaleOrderCategory)
+	api.DELETE("/sale-order-categories/:saleOrderCategoryID", server.handleDeleteSaleOrderCategory)
 	api.POST("/delete-all-data", server.handleDeleteAllData)
 
 	// Scrape observability

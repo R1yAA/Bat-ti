@@ -6,6 +6,7 @@ const navigationItems = [
   { to: "/", label: "Vendors", icon: "🏬", end: true },
   { to: "/compare", label: "Compare", icon: "⚖️", end: false },
   { to: "/orders", label: "Orders", icon: "🧾", end: false },
+  { to: "/sales", label: "Sales", icon: "💰", end: false },
   { to: "/spend", label: "Spend", icon: "📊", end: false },
   { to: "/settings", label: "Settings", icon: "⚙️", end: false },
 ];

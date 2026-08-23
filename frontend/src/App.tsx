@@ -39,6 +39,16 @@ const OrderDetailPage = lazy(() =>
     default: module.OrderDetailPage,
   })),
 );
+const SalesListPage = lazy(() =>
+  import("./pages/SalesPage").then((module) => ({
+    default: module.SalesListPage,
+  })),
+);
+const SaleOrderDetailPage = lazy(() =>
+  import("./pages/SalesPage").then((module) => ({
+    default: module.SaleOrderDetailPage,
+  })),
+);
 const SpendPage = lazy(() =>
   import("./pages/SpendPage").then((module) => ({ default: module.SpendPage })),
 );
@@ -78,6 +88,12 @@ export function App() {
         {/* P3 */}
         <Route path="/orders" element={<OrdersListPage />} />
         <Route path="/orders/:orderEntryID" element={<OrderDetailPage />} />
+        {/* P6 */}
+        <Route path="/sales" element={<SalesListPage />} />
+        <Route
+          path="/sales/:saleOrderEntryID"
+          element={<SaleOrderDetailPage />}
+        />
         {/* P4 */}
         <Route path="/spend" element={<SpendPage />} />
         {/* P5 */}

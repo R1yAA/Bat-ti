@@ -209,11 +209,11 @@ type deleteAllDataRequest struct {
 
 // BR-14: one global wipe, gated by typing an exact phrase.
 //
-// Its scope is the user's own records — orders, comparisons, categories and
-// occasion tags. Vendors, listings and price history survive: they are not the
-// user's data, and price history in particular accumulates one day at a time
-// and cannot be re-scraped once destroyed, while orders can be re-entered from
-// receipts.
+// Its scope is the user's own records — purchases, sales, comparisons,
+// categories and occasion tags. Vendors, listings and price history survive:
+// they are not the user's data, and price history in particular accumulates
+// one day at a time and cannot be re-scraped once destroyed, while orders can
+// be re-entered from receipts.
 func (server *Server) handleDeleteAllData(context *gin.Context) {
 	var request deleteAllDataRequest
 	if err := context.ShouldBindJSON(&request); err != nil {
@@ -234,12 +234,17 @@ func (server *Server) handleDeleteAllData(context *gin.Context) {
 	defer transaction.Rollback(context)
 	transactionalQueries := server.queries.WithTx(transaction)
 
-	// Order items and tag joins fall with their parents by cascade.
+	// Order items, sale order items and tag joins fall with their parents by
+	// cascade. Sale orders are in scope for the same reason purchases are:
+	// they are the user's own records, and a wipe that quietly kept them would
+	// not be the wipe this button promises.
 	for _, wipeStep := range []func() error{
 		func() error { return transactionalQueries.DeleteAllOrderEntries(context) },
+		func() error { return transactionalQueries.DeleteAllSaleOrderEntries(context) },
 		func() error { return transactionalQueries.DeleteAllCompareEntries(context) },
 		func() error { return transactionalQueries.DeleteAllOccasionTags(context) },
 		func() error { return transactionalQueries.DeleteAllNonSystemCategories(context) },
+		func() error { return transactionalQueries.DeleteAllNonSystemSaleOrderCategories(context) },
 	} {
 		if err := wipeStep(); err != nil {
 			server.respondDatabaseError(context, err, "data wipe")
@@ -253,8 +258,9 @@ func (server *Server) handleDeleteAllData(context *gin.Context) {
 
 	server.logger.Warn("all user data deleted on request")
 	context.JSON(http.StatusOK, gin.H{
-		"deleted": []string{"order entries", "order items", "compare entries",
-			"occasion tags", "custom categories"},
+		"deleted": []string{"order entries", "order items", "sale order entries",
+			"sale order items", "compare entries", "occasion tags",
+			"custom categories", "custom sale order categories"},
 		"kept": []string{"vendors", "listings", "variants", "moq tiers", "price history"},
 	})
 }

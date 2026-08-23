@@ -190,6 +190,42 @@ export interface OrderEntry {
   items?: OrderItem[];
 }
 
+/** BR-20. The order of this union is the order the workflow runs in. */
+export type SaleOrderStatus =
+  "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
+
+export interface SaleOrderCategory {
+  sale_order_category_id: UUID;
+  category_name: string;
+  is_system: boolean;
+  usage_count: number;
+}
+
+export interface SaleOrderItem {
+  sale_order_item_id: UUID;
+  sale_order_entry_id: UUID;
+  /** Free text: there is no catalogue of finished goods yet (FR-P6-3). */
+  product_name: string;
+  quantity: number;
+  price_per_unit: Decimal;
+  line_total: Decimal;
+}
+
+export interface SaleOrderEntry {
+  sale_order_entry_id: UUID;
+  /** BR-21: the four-to-six-digit number quoted to the customer, not the key. */
+  sale_order_id: number;
+  consumer_name: string;
+  order_placed_date: string;
+  order_status: SaleOrderStatus;
+  delivered_date: string | null;
+  sale_order_category_id: UUID;
+  category_name: string;
+  total_amount: Decimal;
+  item_count: number;
+  items?: SaleOrderItem[];
+}
+
 export interface SpendSummary {
   net_spend: Decimal;
   gross_spend: Decimal;
@@ -215,6 +251,28 @@ export interface MonthlySpend {
   month: string;
   net_spend: Decimal;
   gross_spend: Decimal;
+}
+
+/** FR-P4-7. "Gain" is revenue, never profit — OPEN-5 in the addendum: nothing
+ *  links a sold product back to the materials that went into it yet. */
+export interface SalesSummary {
+  net_gain: Decimal;
+  gross_gain: Decimal;
+  cancelled_gain: Decimal;
+  sale_count: number;
+  pending_count: number;
+}
+
+export interface CategorySales {
+  category_name: string;
+  net_gain: Decimal;
+  gross_gain: Decimal;
+}
+
+export interface MonthlySales {
+  month: string;
+  net_gain: Decimal;
+  gross_gain: Decimal;
 }
 
 export interface ScrapeRun {

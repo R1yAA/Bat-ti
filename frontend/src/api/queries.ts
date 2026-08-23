@@ -13,10 +13,15 @@ import type {
   MonthlySpend,
   OccasionTag,
   OrderEntry,
+  SaleOrderCategory,
+  SaleOrderEntry,
   ScrapeRun,
   SpendSummary,
+  CategorySales,
   CategorySpend,
+  MonthlySales,
   OccasionSpend,
+  SalesSummary,
   TrackedListing,
   UUID,
   Vendor,
@@ -35,8 +40,15 @@ export const queryKeys = {
   compareEntry: (entryID: UUID) => ["compare-entry", entryID] as const,
   orderEntries: ["order-entries"] as const,
   orderEntry: (orderEntryID: UUID) => ["order-entry", orderEntryID] as const,
+  saleOrderEntries: ["sale-order-entries"] as const,
+  saleOrderEntry: (saleOrderEntryID: UUID) =>
+    ["sale-order-entry", saleOrderEntryID] as const,
   spend: ["spend"] as const,
+  // Separate from `spend` so a purchase write does not refetch the sell-side
+  // figures, and a sale does not refetch the buy-side ones.
+  sales: ["sales"] as const,
   categories: ["categories"] as const,
+  saleOrderCategories: ["sale-order-categories"] as const,
   occasionTags: ["occasion-tags"] as const,
   scrapeRuns: ["scrape-runs"] as const,
 };
@@ -360,6 +372,143 @@ export function useDeleteOrderItem() {
   });
 }
 
+// ── P6: sales orders ──────────────────────────────────────────────────────
+
+/** FR-P6-6. An empty status means every sale. */
+export function useSaleOrderEntries(status: string) {
+  return useQuery({
+    queryKey: [...queryKeys.saleOrderEntries, status],
+    queryFn: () =>
+      api.get<{ sale_order_entries: SaleOrderEntry[] }>(
+        `/sale-order-entries${queryString({ status })}`,
+      ),
+    select: (data) => data.sale_order_entries,
+  });
+}
+
+export function useSaleOrderEntry(saleOrderEntryID: UUID) {
+  return useQuery({
+    queryKey: queryKeys.saleOrderEntry(saleOrderEntryID),
+    queryFn: () =>
+      api.get<SaleOrderEntry>(`/sale-order-entries/${saleOrderEntryID}`),
+    enabled: saleOrderEntryID !== "",
+  });
+}
+
+/** Every sale write moves a gain figure, so the sell-side analytics and the
+ *  category usage counts are invalidated alongside. */
+function invalidateSales(queryClient: QueryClient, saleOrderEntryID?: UUID) {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.saleOrderEntries });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.sales });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.saleOrderCategories,
+  });
+  if (saleOrderEntryID) {
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.saleOrderEntry(saleOrderEntryID),
+    });
+  }
+}
+
+export interface SaleOrderEntryInput {
+  consumer_name: string;
+  order_placed_date: string;
+  order_status: string;
+  /** Ignored by the API unless order_status is "delivered" (BR-20). */
+  delivered_date: string | null;
+  sale_order_category_id: UUID | null;
+}
+
+export function useCreateSaleOrderEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SaleOrderEntryInput) =>
+      api.post<SaleOrderEntry>("/sale-order-entries", input),
+    onSuccess: () => invalidateSales(queryClient),
+  });
+}
+
+export function useUpdateSaleOrderEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      saleOrderEntryID,
+      input,
+    }: {
+      saleOrderEntryID: UUID;
+      input: SaleOrderEntryInput;
+    }) =>
+      api.put<SaleOrderEntry>(`/sale-order-entries/${saleOrderEntryID}`, input),
+    onSuccess: (_result, variables) =>
+      invalidateSales(queryClient, variables.saleOrderEntryID),
+  });
+}
+
+export function useDeleteSaleOrderEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (saleOrderEntryID: UUID) =>
+      api.delete<unknown>(`/sale-order-entries/${saleOrderEntryID}`),
+    onSuccess: () => invalidateSales(queryClient),
+  });
+}
+
+export interface SaleOrderItemInput {
+  product_name: string;
+  quantity: number;
+  price_per_unit: string;
+}
+
+export function useCreateSaleOrderItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      saleOrderEntryID,
+      input,
+    }: {
+      saleOrderEntryID: UUID;
+      input: SaleOrderItemInput;
+    }) =>
+      api.post<SaleOrderEntry>(
+        `/sale-order-entries/${saleOrderEntryID}/items`,
+        input,
+      ),
+    onSuccess: (_result, variables) =>
+      invalidateSales(queryClient, variables.saleOrderEntryID),
+  });
+}
+
+export function useUpdateSaleOrderItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      saleOrderItemID,
+      input,
+    }: {
+      saleOrderItemID: UUID;
+      saleOrderEntryID: UUID;
+      input: SaleOrderItemInput;
+    }) =>
+      api.put<SaleOrderEntry>(`/sale-order-items/${saleOrderItemID}`, input),
+    onSuccess: (_result, variables) =>
+      invalidateSales(queryClient, variables.saleOrderEntryID),
+  });
+}
+
+export function useDeleteSaleOrderItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      saleOrderItemID,
+    }: {
+      saleOrderItemID: UUID;
+      saleOrderEntryID: UUID;
+    }) => api.delete<unknown>(`/sale-order-items/${saleOrderItemID}`),
+    onSuccess: (_result, variables) =>
+      invalidateSales(queryClient, variables.saleOrderEntryID),
+  });
+}
+
 // ── P4: spend ─────────────────────────────────────────────────────────────
 
 export function useSpendSummary(startDate: string, endDate: string) {
@@ -398,6 +547,37 @@ export function useMonthlySpendTrend() {
   return useQuery({
     queryKey: [...queryKeys.spend, "monthly"],
     queryFn: () => api.get<{ months: MonthlySpend[] }>("/spend-monthly-trend"),
+    select: (data) => data.months,
+  });
+}
+
+// ── P4, sell side: FR-P4-7 and FR-P4-8 ────────────────────────────────────
+
+export function useSalesSummary(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: [...queryKeys.sales, "summary", startDate, endDate],
+    queryFn: () =>
+      api.get<SalesSummary>(
+        `/sales-summary${queryString({ start_date: startDate, end_date: endDate })}`,
+      ),
+  });
+}
+
+export function useSalesByCategory(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: [...queryKeys.sales, "by-category", startDate, endDate],
+    queryFn: () =>
+      api.get<{ categories: CategorySales[] }>(
+        `/sales-by-category${queryString({ start_date: startDate, end_date: endDate })}`,
+      ),
+    select: (data) => data.categories,
+  });
+}
+
+export function useMonthlySalesTrend() {
+  return useQuery({
+    queryKey: [...queryKeys.sales, "monthly"],
+    queryFn: () => api.get<{ months: MonthlySales[] }>("/sales-monthly-trend"),
     select: (data) => data.months,
   });
 }
@@ -474,6 +654,60 @@ export function useDeleteOccasionTag() {
   return useMutation({
     mutationFn: (tagID: UUID) => api.delete<unknown>(`/occasion-tags/${tagID}`),
     onSuccess: () => invalidateOrders(queryClient),
+  });
+}
+
+// FR-P5-4: a separate managed list from the material categories above. The
+// two are never merged — see the collision warning in the addendum.
+
+export function useSaleOrderCategories() {
+  return useQuery({
+    queryKey: queryKeys.saleOrderCategories,
+    queryFn: () =>
+      api.get<{ sale_order_categories: SaleOrderCategory[] }>(
+        "/sale-order-categories",
+      ),
+    select: (data) => data.sale_order_categories,
+  });
+}
+
+export function useCreateSaleOrderCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      api.post<SaleOrderCategory>("/sale-order-categories", { name }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.saleOrderCategories,
+      }),
+  });
+}
+
+export function useRenameSaleOrderCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      saleOrderCategoryID,
+      name,
+    }: {
+      saleOrderCategoryID: UUID;
+      name: string;
+    }) =>
+      api.put<SaleOrderCategory>(
+        `/sale-order-categories/${saleOrderCategoryID}`,
+        { name },
+      ),
+    onSuccess: () => invalidateSales(queryClient),
+  });
+}
+
+export function useDeleteSaleOrderCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (saleOrderCategoryID: UUID) =>
+      api.delete<unknown>(`/sale-order-categories/${saleOrderCategoryID}`),
+    // BR-23 moves the orphaned sales to Uncategorized, so the sales change too.
+    onSuccess: () => invalidateSales(queryClient),
   });
 }
 

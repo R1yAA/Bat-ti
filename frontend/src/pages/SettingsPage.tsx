@@ -3,12 +3,16 @@ import {
   useCategories,
   useCreateCategory,
   useCreateOccasionTag,
+  useCreateSaleOrderCategory,
   useDeleteAllData,
   useDeleteCategory,
   useDeleteOccasionTag,
+  useDeleteSaleOrderCategory,
   useOccasionTags,
   useRenameCategory,
   useRenameOccasionTag,
+  useRenameSaleOrderCategory,
+  useSaleOrderCategories,
   useScrapeRuns,
   useVendors,
 } from "../api/queries";
@@ -35,6 +39,7 @@ export function SettingsPage() {
       <AccountSection />
       <CategoriesSection />
       <OccasionTagsSection />
+      <SaleOrderCategoriesSection />
       <VendorHealthSection />
       <DangerZone />
     </div>
@@ -178,10 +183,83 @@ function OccasionTagsSection() {
   );
 }
 
+/** FR-P5-4. Deliberately a second list rather than a reuse of the one above:
+ *  a selling group ("Wedding favours") and a material group ("Wax") are not
+ *  the same kind of label, and sharing one list would put every raw material
+ *  in the dropdown for a sale. */
+function SaleOrderCategoriesSection() {
+  const categoriesQuery = useSaleOrderCategories();
+  const createCategory = useCreateSaleOrderCategory();
+  const renameCategory = useRenameSaleOrderCategory();
+  const deleteCategory = useDeleteSaleOrderCategory();
+  const [newName, setNewName] = useState("");
+
+  return (
+    <Card>
+      <h2 className="mb-1 text-sm font-semibold tracking-wide text-ink-soft uppercase">
+        Sales categories
+      </h2>
+      <p className="mb-3 text-xs text-ink-faint">
+        How you group what you sell — wedding favours, retail, corporate
+        gifting. Separate from the material categories above. Deleting one moves
+        its sales to Uncategorized; no sale is ever lost.
+      </p>
+
+      {categoriesQuery.isPending && <Spinner label="Loading" />}
+      {categoriesQuery.isError && <ErrorNotice error={categoriesQuery.error} />}
+
+      <ul className="divide-y divide-wick-100">
+        {categoriesQuery.data?.map((category) => (
+          <EditableTagRow
+            key={category.sale_order_category_id}
+            id={category.sale_order_category_id}
+            name={category.category_name}
+            usageCount={category.usage_count}
+            /* BR-23 reassigns to this row, so it cannot itself be removed. */
+            isProtected={category.is_system}
+            usageNoun="sale"
+            onRename={(name) =>
+              renameCategory.mutate({
+                saleOrderCategoryID: category.sale_order_category_id,
+                name,
+              })
+            }
+            onDelete={() =>
+              deleteCategory.mutate(category.sale_order_category_id)
+            }
+          />
+        ))}
+      </ul>
+
+      {deleteCategory.isError && <ErrorNotice error={deleteCategory.error} />}
+
+      <div className="mt-3 flex gap-2">
+        <input
+          value={newName}
+          onChange={(event) => setNewName(event.target.value)}
+          placeholder="New sales category"
+          className="min-w-0 flex-1 rounded-xl border border-wick-200 bg-surface px-3 py-2.5 text-base outline-none placeholder:text-ink-faint focus:border-wick-500 focus:ring-2 focus:ring-wick-500/20"
+        />
+        <Button
+          disabled={!newName.trim() || createCategory.isPending}
+          onClick={() =>
+            createCategory.mutate(newName.trim(), {
+              onSuccess: () => setNewName(""),
+            })
+          }
+        >
+          Add
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function EditableTagRow({
   name,
   usageCount,
   isProtected = false,
+  usageNoun = "item",
   onRename,
   onDelete,
 }: {
@@ -189,6 +267,9 @@ function EditableTagRow({
   name: string;
   usageCount: number;
   isProtected?: boolean;
+  /** What the deletion warning counts — "item" on the purchase side, "sale"
+   *  on the sell side. The two lists are never merged, so nor is the wording. */
+  usageNoun?: string;
   onRename: (name: string) => void;
   onDelete: () => void;
 }) {
@@ -254,7 +335,7 @@ function EditableTagRow({
                 title: `Delete "${name}"?`,
                 message:
                   usageCount > 0
-                    ? `${usageCount} item${usageCount === 1 ? "" : "s"} using it will move to Uncategorized.`
+                    ? `${usageCount} ${usageNoun}${usageCount === 1 ? "" : "s"} using it will move to Uncategorized.`
                     : undefined,
               });
               if (isConfirmed) onDelete();
@@ -345,10 +426,10 @@ function DangerZone() {
         Delete all data
       </h2>
       <p className="mb-3 text-xs text-ink-soft">
-        Removes every order, comparison, category and occasion tag. Vendors,
-        products and their price history are kept — that history is collected one
-        day at a time and cannot be recovered, while orders can be re-entered
-        from receipts.
+        Removes every order, sale, comparison, category and occasion tag.
+        Vendors, products and their price history are kept — that history is
+        collected one day at a time and cannot be recovered, while orders and
+        sales can be re-entered from receipts.
       </p>
 
       {!isArmed ? (

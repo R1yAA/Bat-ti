@@ -13,7 +13,10 @@ import {
   YAxis,
 } from "recharts";
 import {
+  useMonthlySalesTrend,
   useMonthlySpendTrend,
+  useSalesByCategory,
+  useSalesSummary,
   useSpendByCategory,
   useSpendByOccasion,
   useSpendSummary,
@@ -41,6 +44,22 @@ const presets = [
   { label: "1 year", start: () => monthsAgo(12) },
 ];
 
+// The sell side gets its own palette so a gain figure is never mistaken for a
+// spend one at a glance.
+const gainColour = "#3f7d58";
+const spendColour = "#c97a35";
+
+const gainSliceColours = [
+  "#3f7d58",
+  "#2c5a3f",
+  "#63a37c",
+  "#1e4230",
+  "#8cc4a3",
+  "#4a8f66",
+  "#b7ddc7",
+  "#356b4a",
+];
+
 const sliceColours = [
   "#c97a35",
   "#8a4826",
@@ -64,6 +83,10 @@ export function SpendPage() {
   const categoryQuery = useSpendByCategory(startDate, endDate);
   const occasionQuery = useSpendByOccasion(startDate, endDate);
   const monthlyQuery = useMonthlySpendTrend();
+  // FR-P4-7 and FR-P4-8: the sell side, on the same range as everything above.
+  const salesSummaryQuery = useSalesSummary(startDate, endDate);
+  const salesCategoryQuery = useSalesByCategory(startDate, endDate);
+  const monthlySalesQuery = useMonthlySalesTrend();
 
   const applyPreset = (preset: (typeof presets)[number]) => {
     setStartDate(preset.start());
@@ -78,9 +101,21 @@ export function SpendPage() {
       : summary.net_spend
     : null;
 
+  const salesSummary = salesSummaryQuery.data;
+  // OPEN-6, mirroring BR-12: a cancelled sale never happened, so it is out of
+  // the headline unless the same toggle asks for it.
+  const headlineGain = salesSummary
+    ? includeExcluded
+      ? salesSummary.gross_gain
+      : salesSummary.net_gain
+    : null;
+
   return (
     <div className="space-y-4">
-      <PageHeading title="Spend" subtitle="Where the money went" />
+      <PageHeading
+        title="Spend"
+        subtitle="Where the money went, and what came back"
+      />
 
       <div className="swipe-x -mx-4 px-4">
         <div className="flex gap-2 pb-1">
@@ -161,6 +196,69 @@ export function SpendPage() {
         </Card>
       )}
 
+      {/* FR-P4-7. "Gain" not "profit" (OPEN-5): this is what customers paid,
+          with nothing subtracted for the materials that went into the goods.
+          Naming it profit would overstate the business by the whole cost of
+          making the thing. */}
+      {salesSummaryQuery.isError && (
+        <ErrorNotice error={salesSummaryQuery.error} />
+      )}
+      {salesSummary && (
+        <Card>
+          <p className="text-xs font-medium tracking-wide text-ink-soft uppercase">
+            {includeExcluded ? "Total gain including cancelled" : "Total gain"}
+          </p>
+          <p
+            className="mt-1 text-4xl font-semibold tracking-tight"
+            style={{ color: gainColour }}
+          >
+            {formatRupees(headlineGain)}
+          </p>
+          <p className="mt-1 text-sm text-ink-soft">
+            {salesSummary.sale_count}{" "}
+            {salesSummary.sale_count === 1 ? "sale" : "sales"}
+            {salesSummary.pending_count > 0 && (
+              <> · {salesSummary.pending_count} still pending</>
+            )}
+          </p>
+
+          {headlineSpend !== null && headlineGain !== null && (
+            <p className="mt-3 border-t border-wick-100 pt-3 text-sm text-ink-soft">
+              {toNumber(headlineGain) - toNumber(headlineSpend) >= 0
+                ? "Ahead of materials spend by "
+                : "Behind materials spend by "}
+              <span className="font-medium text-ink">
+                {formatRupees(
+                  String(
+                    Math.abs(toNumber(headlineGain) - toNumber(headlineSpend)),
+                  ),
+                )}
+              </span>{" "}
+              over this range.
+            </p>
+          )}
+
+          {/* OPEN-5, said plainly rather than left for the reader to assume. */}
+          <p className="mt-2 text-xs text-ink-faint">
+            Sales revenue, not profit — nothing is deducted here for the
+            materials that went into what was sold.
+          </p>
+        </Card>
+      )}
+
+      <DonutCard
+        title="Sales by category"
+        hint="How the money coming in splits across what you sell."
+        isPending={salesCategoryQuery.isPending}
+        error={salesCategoryQuery.error}
+        colours={gainSliceColours}
+        emptyMessage="No sales in this period."
+        slices={(salesCategoryQuery.data ?? []).map((row) => ({
+          name: row.category_name,
+          amount: toNumber(includeExcluded ? row.gross_gain : row.net_gain),
+        }))}
+      />
+
       <DonutCard
         title="By category"
         hint="Your own labels, set per order item."
@@ -236,7 +334,69 @@ export function SpendPage() {
                     fontSize: 13,
                   }}
                 />
-                <Bar dataKey="amount" fill="#c97a35" radius={[6, 6, 0, 0]} />
+                <Bar
+                  dataKey="amount"
+                  fill={spendColour}
+                  radius={[6, 6, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </Card>
+      <Card>
+        <h2 className="text-sm font-semibold tracking-wide text-ink-soft uppercase">
+          Sales, last 12 months
+        </h2>
+        {/* The same trailing year as the spend chart above, deliberately, so
+            the two can be read against each other month for month. */}
+        <p className="mb-3 text-xs text-ink-faint">
+          Always the trailing year, whatever range is set above.
+        </p>
+        {monthlySalesQuery.isPending && <Spinner label="Loading" />}
+        {monthlySalesQuery.isError && (
+          <ErrorNotice error={monthlySalesQuery.error} />
+        )}
+        {monthlySalesQuery.data && (
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={monthlySalesQuery.data.map((row) => ({
+                  month: formatMonthLabel(row.month),
+                  amount: toNumber(
+                    includeExcluded ? row.gross_gain : row.net_gain,
+                  ),
+                }))}
+                margin={{ top: 4, right: 4, bottom: 28, left: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke="#f7ead6" />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 10, fill: "#9a877c" }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval={0}
+                  angle={-45}
+                  textAnchor="end"
+                  height={44}
+                />
+                <YAxis
+                  tickFormatter={formatRupeesCompact}
+                  tick={{ fontSize: 11, fill: "#9a877c" }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={52}
+                />
+                <Tooltip
+                  cursor={{ fill: "#f7f1e7" }}
+                  formatter={(value) => [formatRupees(String(value)), "Gained"]}
+                  contentStyle={{
+                    borderRadius: 12,
+                    border: "1px solid #eed3ab",
+                    fontSize: 13,
+                  }}
+                />
+                <Bar dataKey="amount" fill={gainColour} radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -254,12 +414,16 @@ function DonutCard({
   isPending,
   error,
   slices,
+  colours = sliceColours,
+  emptyMessage = "No spending in this period.",
 }: {
   title: string;
   hint: string;
   isPending: boolean;
   error: unknown;
   slices: { name: string; amount: number }[];
+  colours?: string[];
+  emptyMessage?: string;
 }) {
   const spendingSlices = slices.filter((slice) => slice.amount > 0);
   const total = spendingSlices.reduce((sum, slice) => sum + slice.amount, 0);
@@ -276,7 +440,7 @@ function DonutCard({
 
       {!isPending && !error && spendingSlices.length === 0 && (
         <p className="py-6 text-center text-sm text-ink-faint">
-          No spending in this period.
+          {emptyMessage}
         </p>
       )}
 
@@ -299,7 +463,7 @@ function DonutCard({
                   {spendingSlices.map((slice, index) => (
                     <Cell
                       key={slice.name}
-                      fill={sliceColours[index % sliceColours.length]}
+                      fill={colours[index % colours.length]}
                     />
                   ))}
                 </Pie>
