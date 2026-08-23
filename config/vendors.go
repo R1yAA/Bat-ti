@@ -89,11 +89,16 @@ type VendorConfig struct {
 	// VendorSlug is the stable key shared by this file, the database
 	// (vendors.vendor_slug) and the --vendor CLI flag. Never change one
 	// without the others.
-	VendorSlug          string
-	DisplayName         string
-	SourceBaseURL       string
-	ScraperTier         ScraperTier
-	ScrapeHourUTC       int // staggered slot; 23 UTC is 04:30 IST
+	VendorSlug    string
+	DisplayName   string
+	SourceBaseURL string
+	ScraperTier   ScraperTier
+	// ScrapeHourUTC is the vendor's slot; 23 UTC is 04:30 IST. Slots are an
+	// hour apart for vendors with a catalogue feed, which finish in seconds,
+	// and two apart for the three read page by page — Jindeal, Plutonious and
+	// Restokart — so a slow one finishes before the next becomes due instead
+	// of both landing in the same run.
+	ScrapeHourUTC       int
 	RequestDelaySeconds int // politeness gap between product-page fetches
 
 	// RequestsPerSecond overrides RequestDelaySeconds when set, for vendors
@@ -191,7 +196,7 @@ var TrackedVendors = []VendorConfig{
 		DisplayName:         "Plutonious Innovations",
 		SourceBaseURL:       "https://www.plutoniousinnovations.com",
 		ScraperTier:         ScraperTierDotpeJSON,
-		ScrapeHourUTC:       7,
+		ScrapeHourUTC:       8,
 		RequestDelaySeconds: 2,
 		// No catalogue feed: all ~1,700 products are read page by page.
 		RequestsPerSecond:    4,
@@ -205,7 +210,7 @@ var TrackedVendors = []VendorConfig{
 		DisplayName:         "Restokart",
 		SourceBaseURL:       "https://www.restokart.com",
 		ScraperTier:         ScraperTierStaticHTML,
-		ScrapeHourUTC:       8,
+		ScrapeHourUTC:       10,
 		RequestDelaySeconds: 2,
 		// Same shape as Plutonious: ~1,250 product pages, no feed.
 		RequestsPerSecond:    4,

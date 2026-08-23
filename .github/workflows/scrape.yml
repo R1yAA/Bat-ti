@@ -5,8 +5,9 @@ name: scrape
 
 on:
   schedule:
-    # Cron here is UTC. 23:00 UTC is 04:30 IST, which is where the vendor slots
-    # start; each vendor runs one hour after the previous one.
+    # Cron here is UTC. 23:00 UTC is 04:30 IST, where the vendor slots start.
+    # Vendors with a catalogue feed sit an hour apart; the three read page by
+    # page sit two apart, so a slow one finishes before the next is due.
     - cron: '0 * * * *'
   # Always available as a manual kick — needed because GitHub disables
   # scheduled workflows after 60 days of repository inactivity, and useful for
